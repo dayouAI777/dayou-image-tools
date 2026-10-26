@@ -20,7 +20,7 @@ dayou-image-tools-1.3.1.dayouupdate
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
-<dayouUpdate product="DayouImageTools" version="1.3.2" minimumUpdaterVersion="1.3.2">
+<dayouUpdate product="DayouImageTools" version="1.3.3" minimumUpdaterVersion="1.3.2">
   <file source="payload/DayouImageTools.exe" target="DayouImageTools.exe" sha256="替换为64位十六进制SHA-256" />
   <file source="payload/Magick.NET-Q8-x64.dll" target="Magick.NET-Q8-x64.dll" sha256="替换为64位十六进制SHA-256" />
   <file source="payload/Magick.NET.Core.dll" target="Magick.NET.Core.dll" sha256="替换为64位十六进制SHA-256" />

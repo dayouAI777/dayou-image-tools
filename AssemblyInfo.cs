@@ -5,5 +5,5 @@ using System.Reflection;
 [assembly: AssemblyCompany("大有")]
 [assembly: AssemblyProduct("大有图片工具")]
 [assembly: AssemblyCopyright("Copyright © 大有")]
-[assembly: AssemblyVersion("1.3.2.0")]
-[assembly: AssemblyFileVersion("1.3.2.0")]
+[assembly: AssemblyVersion("1.3.3.0")]
+[assembly: AssemblyFileVersion("1.3.3.0")]

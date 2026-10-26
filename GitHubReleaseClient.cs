@@ -40,7 +40,7 @@ namespace DayouImageToolsUpdater
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(apiUrl);
             request.Method = "GET";
             request.Accept = "application/vnd.github+json";
-            request.UserAgent = "DayouImageToolsUpdater/1.3.2";
+            request.UserAgent = "DayouImageToolsUpdater/1.3.3";
             request.Headers["X-GitHub-Api-Version"] = "2022-11-28";
             request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
             request.Timeout = 30000;
@@ -140,7 +140,7 @@ namespace DayouImageToolsUpdater
 
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(uri);
             request.Method = "GET";
-            request.UserAgent = "DayouImageToolsUpdater/1.3.2";
+            request.UserAgent = "DayouImageToolsUpdater/1.3.3";
             request.Accept = "application/octet-stream";
             request.Timeout = 30000;
             request.ReadWriteTimeout = 60000;

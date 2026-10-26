@@ -20,7 +20,7 @@
 
 假设新版本是 `1.3.3`：
 
-1. 在 `setup.iss` 更新 `MyAppVersion`、`OutputBaseFilename` 和 `VersionInfoVersion`，三个位置都写成新版本。
+1. 在 `setup.iss` 更新 `MyAppVersion`。安装包文件名和 `VersionInfoVersion` 使用该宏自动生成，不要再单独改数字。
 2. 在 `AssemblyInfo.cs` 和 `UpdaterAssemblyInfo.cs` 更新 `AssemblyVersion` 与 `AssemblyFileVersion`。
 3. 新建 `RELEASE_NOTES_v1.3.3.md`，用简短条目说明修复和新增功能。文件名必须与 `setup.iss` 里的版本一致，否则工作流会在构建前停止。
 4. 将代码、版本号和更新说明提交并推送到 `main`。合并到 `main` 的 Pull Request 也会触发工作流。

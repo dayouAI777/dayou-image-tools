@@ -12,6 +12,7 @@ namespace LocalPhotoViewer
 {
     internal enum EditorTool { View, Crop, Brush, Text, Arrow, Rectangle, Mosaic }
     internal enum BrushTipShape { Round, Square }
+    internal enum FrameAnnotationShape { Rectangle, Circle, Ellipse }
 
     internal sealed class PhotoEditorForm : Form
     {
@@ -35,6 +36,7 @@ namespace LocalPhotoViewer
         private bool _updatingCropControls;
         private readonly NumericUpDown _brushSize;
         private readonly ComboBox _brushShape;
+        private readonly ComboBox _frameShape;
         private TabControl _sideTabs;
         private TabPage _cropPage;
         private TabPage _annotatePage;
@@ -46,6 +48,7 @@ namespace LocalPhotoViewer
         private Label _annotationTextLabel;
         private Label _brushSizeLabel;
         private Label _brushShapeLabel;
+        private Label _frameShapeLabel;
         private Label _annotateHelp;
         private Label _brightnessLabel;
         private Label _contrastLabel;
@@ -118,11 +121,15 @@ namespace LocalPhotoViewer
                 BeginCropSelection();
             };
             _brushSize = new NumericUpDown { Minimum = 1, Maximum = 120, Value = 8, Width = 62 };
-            _brushSize.ValueChanged += delegate { _canvas.BrushSize = (int)_brushSize.Value; };
+            _brushSize.ValueChanged += delegate { _canvas.BrushSize = (int)_brushSize.Value; _canvas.Invalidate(); };
             _brushShape = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 96 };
             _brushShape.Items.AddRange(new object[] { "圆形", "方形" });
             _brushShape.SelectedIndex = 0;
             _brushShape.SelectedIndexChanged += delegate { _canvas.BrushShape = _brushShape.SelectedIndex == 1 ? BrushTipShape.Square : BrushTipShape.Round; _canvas.Invalidate(); };
+            _frameShape = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 164 };
+            _frameShape.Items.AddRange(new object[] { "矩形", "圆形", "椭圆" });
+            _frameShape.SelectedIndex = 0;
+            _frameShape.SelectedIndexChanged += delegate { _canvas.FrameShape = (FrameAnnotationShape)_frameShape.SelectedIndex; _canvas.Invalidate(); };
 
             Panel sidePanel = BuildSidePanel();
             SplitContainer split = new SplitContainer { Width = 1240, Height = 720, SplitterDistance = 940, FixedPanel = FixedPanel.Panel2, IsSplitterFixed = true, Panel1MinSize = 500, Panel2MinSize = 270, SplitterWidth = 2, BackColor = Mint, Dock = DockStyle.Fill };
@@ -240,6 +247,9 @@ namespace LocalPhotoViewer
             _annotatePage.Controls.Add(_annotationText);
             _drawColorButton = CreateActionButton("选择颜色…", 14, 94, 112, 34, false);
             _drawColorButton.Click += delegate { ChooseColor(); };
+            _drawColorButton.BackColor = _drawColor;
+            _drawColorButton.ForeColor = _drawColor.GetBrightness() < 0.48f ? Color.White : Navy;
+            _drawColorButton.Text = "颜色 #" + _drawColor.R.ToString("X2") + _drawColor.G.ToString("X2") + _drawColor.B.ToString("X2");
             _annotatePage.Controls.Add(_drawColorButton);
             _brushSizeLabel = new Label { Text = "粗细", Location = new Point(134, 96), Width = 34, Height = 28, TextAlign = ContentAlignment.MiddleCenter };
             _annotatePage.Controls.Add(_brushSizeLabel);
@@ -249,6 +259,11 @@ namespace LocalPhotoViewer
             _annotatePage.Controls.Add(_brushShapeLabel);
             _brushShape.Location = new Point(58, 142);
             _annotatePage.Controls.Add(_brushShape);
+            _frameShapeLabel = new Label { Text = "形状", Location = new Point(14, 142), Width = 42, Height = 28, TextAlign = ContentAlignment.MiddleCenter, Visible = false };
+            _annotatePage.Controls.Add(_frameShapeLabel);
+            _frameShape.Location = new Point(58, 142);
+            _frameShape.Visible = false;
+            _annotatePage.Controls.Add(_frameShape);
             _applyWatermarkButton = CreateActionButton("添加文字水印", 14, 194, 230, 38, true);
             _applyWatermarkButton.Click += ApplyTextWatermark;
             _annotatePage.Controls.Add(_applyWatermarkButton);
@@ -426,6 +441,7 @@ namespace LocalPhotoViewer
             bool brush = tool == EditorTool.Brush;
             bool mosaic = tool == EditorTool.Mosaic;
             bool line = tool == EditorTool.Arrow || tool == EditorTool.Rectangle;
+            bool frame = tool == EditorTool.Rectangle;
             bool text = tool == EditorTool.Text;
             _annotationTextLabel.Visible = false;
             _annotationText.Visible = false;
@@ -434,6 +450,8 @@ namespace LocalPhotoViewer
             _brushSize.Visible = brush || mosaic || line;
             _brushShapeLabel.Visible = brush || mosaic;
             _brushShape.Visible = brush || mosaic;
+            _frameShapeLabel.Visible = frame;
+            _frameShape.Visible = frame;
             _applyWatermarkButton.Visible = false;
             _annotateHelp.Visible = true;
 
@@ -451,8 +469,10 @@ namespace LocalPhotoViewer
             }
             else if (line)
             {
-                ShowContext(_annotatePage, tool == EditorTool.Arrow ? "LINE / ARROW" : "FRAME / RECTANGLE", tool == EditorTool.Arrow ? "箭头" : "框选", "设置标注颜色与线宽");
-                _annotateHelp.Text = tool == EditorTool.Arrow ? "在图片上按住并拖动，松开后放置箭头。" : "在图片上拖动即可绘制矩形框。";
+                ShowContext(_annotatePage, tool == EditorTool.Arrow ? "LINE / ARROW" : "FRAME / SHAPES", tool == EditorTool.Arrow ? "箭头" : "框选", "设置颜色、线宽与形状");
+                _annotateHelp.Text = tool == EditorTool.Arrow
+                    ? "按住鼠标拖动时会实时预览箭头；右侧可调整箭头颜色和线宽。松开鼠标后应用到图片。"
+                    : "拖动时实时预览框选形状。右侧可选矩形、圆形或椭圆，并调整颜色和线宽。";
             }
             else if (text)
             {
@@ -489,6 +509,8 @@ namespace LocalPhotoViewer
             _brushSize.Visible = false;
             _brushShapeLabel.Visible = false;
             _brushShape.Visible = false;
+            _frameShapeLabel.Visible = false;
+            _frameShape.Visible = false;
             _applyWatermarkButton.Visible = true;
             _annotateHelp.Visible = true;
             _annotateHelp.Text = "文字水印会放在图片右下方；颜色使用上方选定的标注颜色。";
@@ -610,7 +632,14 @@ namespace LocalPhotoViewer
             else
             {
                 _canvas.ClearSelection();
-                _status.Text = tool == EditorTool.Mosaic ? "像画笔一样拖动图片进行马赛克涂抹；画笔大小可在“标注”里调整。" : "编辑工具：" + tool.ToString();
+                if (tool == EditorTool.Mosaic)
+                    _status.Text = "像画笔一样拖动图片进行马赛克涂抹；可在右侧调整笔尖大小和形状。";
+                else if (tool == EditorTool.Arrow)
+                    _status.Text = "箭头：按住并拖动可实时预览；右侧可选颜色和线宽，松开后应用。";
+                else if (tool == EditorTool.Rectangle)
+                    _status.Text = "框选：拖动可实时预览；右侧可选矩形、圆形或椭圆，并调整颜色和线宽。";
+                else
+                    _status.Text = tool == EditorTool.Brush ? "画笔：拖动即可实时绘制；右侧可调整颜色、粗细和笔尖形状。" : "编辑工具：" + tool.ToString();
             }
         }
 
@@ -618,7 +647,7 @@ namespace LocalPhotoViewer
         {
             if (tool == EditorTool.Brush) DrawStroke(points, _drawColor, (int)_brushSize.Value, _canvas.BrushShape);
             else if (tool == EditorTool.Arrow) DrawArrow(start, end, _drawColor, (int)_brushSize.Value);
-            else if (tool == EditorTool.Rectangle) DrawRectangle(start, end, _drawColor, (int)_brushSize.Value);
+            else if (tool == EditorTool.Rectangle) DrawFrameShape(start, end, _drawColor, (int)_brushSize.Value, _canvas.FrameShape);
             else if (tool == EditorTool.Mosaic)
             {
                 ApplyMosaic(points);
@@ -950,14 +979,16 @@ namespace LocalPhotoViewer
             Commit(result);
         }
 
-        private void DrawRectangle(Point start, Point end, Color color, int width)
+        private void DrawFrameShape(Point start, Point end, Color color, int width, FrameAnnotationShape shape)
         {
             Bitmap result = (Bitmap)_image.Clone();
             using (Graphics g = Graphics.FromImage(result))
             using (Pen pen = new Pen(color, width))
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.DrawRectangle(pen, Math.Min(start.X, end.X), Math.Min(start.Y, end.Y), Math.Max(1, Math.Abs(end.X - start.X)), Math.Max(1, Math.Abs(end.Y - start.Y)));
+                Rectangle bounds = AnnotationGeometry.Bounds(start, end, shape);
+                if (shape == FrameAnnotationShape.Rectangle) g.DrawRectangle(pen, bounds);
+                else g.DrawEllipse(pen, bounds);
             }
             Commit(result);
         }
@@ -1026,6 +1057,7 @@ namespace LocalPhotoViewer
                 {
                     _drawColor = dialog.Color;
                     _canvas.DrawColor = _drawColor;
+                    _canvas.Invalidate();
                     _drawColorButton.BackColor = _drawColor;
                     _drawColorButton.ForeColor = _drawColor.GetBrightness() < 0.48f ? Color.White : Navy;
                     _drawColorButton.Text = "颜色 #" + _drawColor.R.ToString("X2") + _drawColor.G.ToString("X2") + _drawColor.B.ToString("X2");
@@ -1322,6 +1354,7 @@ namespace LocalPhotoViewer
         public double AspectRatio { get; set; }
         public int BrushSize { get; set; }
         public BrushTipShape BrushShape { get; set; }
+        public FrameAnnotationShape FrameShape { get; set; }
         public Color DrawColor { get; set; }
         public Rectangle SelectionInImage { get; private set; }
         public float DisplayScale { get { UpdateImageTransform(); return _scale; } }
@@ -1344,6 +1377,7 @@ namespace LocalPhotoViewer
             ActiveTool = EditorTool.View;
             BrushSize = 8;
             BrushShape = BrushTipShape.Round;
+            FrameShape = FrameAnnotationShape.Rectangle;
             DrawColor = Color.Red;
         }
 
@@ -1544,6 +1578,7 @@ namespace LocalPhotoViewer
             e.Graphics.DrawImage(Image, new RectangleF(_offset.X, _offset.Y, w, h));
             if (_dragging && ActiveTool == EditorTool.Brush) DrawBrushStrokePreview(e.Graphics);
             if (_dragging && ActiveTool == EditorTool.Mosaic) DrawMosaicStrokePreview(e.Graphics);
+            if (_dragging && (ActiveTool == EditorTool.Arrow || ActiveTool == EditorTool.Rectangle)) DrawAnnotationPreview(e.Graphics);
             if (_textPreviewActive) DrawTextPreview(e.Graphics);
             Rectangle rect = SelectionInImage;
             if (!rect.IsEmpty)
@@ -1649,7 +1684,7 @@ namespace LocalPhotoViewer
                 return;
             }
             if (Image == null || e.Button != MouseButtons.Left || ActiveTool == EditorTool.View) return;
-            if ((ActiveTool == EditorTool.Mosaic || ActiveTool == EditorTool.Brush) && !ImageScreenBounds().Contains(e.Location)) return;
+            if ((ActiveTool == EditorTool.Mosaic || ActiveTool == EditorTool.Brush || ActiveTool == EditorTool.Arrow || ActiveTool == EditorTool.Rectangle) && !ImageScreenBounds().Contains(e.Location)) return;
             if (ActiveTool == EditorTool.Mosaic) BeginMosaicStrokePreview();
             _dragging = true;
             _startImage = ImagePoint(e.Location);
@@ -1714,6 +1749,8 @@ namespace LocalPhotoViewer
                     Cursor = Cursors.Cross;
                     Invalidate();
                 }
+                else if (ActiveTool == EditorTool.Arrow || ActiveTool == EditorTool.Rectangle)
+                    Cursor = Cursors.Cross;
                 return;
             }
             Point current = ImagePoint(e.Location);
@@ -1733,6 +1770,8 @@ namespace LocalPhotoViewer
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            _mousePosition = e.Location;
+            _hasMousePosition = true;
             if ((_movingTextPreview || _resizingTextPreview) && e.Button == MouseButtons.Left)
             {
                 _movingTextPreview = false;
@@ -1780,6 +1819,35 @@ namespace LocalPhotoViewer
         {
             if (Image == null) return RectangleF.Empty;
             return new RectangleF(_offset.X, _offset.Y, Image.Width * _scale, Image.Height * _scale);
+        }
+
+        private void DrawAnnotationPreview(Graphics graphics)
+        {
+            if (Image == null) return;
+            Point end = ImagePoint(_mousePosition);
+            PointF startScreen = new PointF(_offset.X + _startImage.X * _scale, _offset.Y + _startImage.Y * _scale);
+            PointF endScreen = new PointF(_offset.X + end.X * _scale, _offset.Y + end.Y * _scale);
+            GraphicsState state = graphics.Save();
+            graphics.SetClip(ImageScreenBounds());
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (Pen pen = new Pen(DrawColor, Math.Max(1f, BrushSize * _scale)))
+            {
+                if (ActiveTool == EditorTool.Arrow)
+                {
+                    pen.EndCap = LineCap.ArrowAnchor;
+                    graphics.DrawLine(pen, startScreen, endScreen);
+                }
+                else
+                {
+                    Rectangle bounds = AnnotationGeometry.Bounds(_startImage, end, FrameShape);
+                    RectangleF screenBounds = ImageRectangleToCanvas(bounds);
+                    if (FrameShape == FrameAnnotationShape.Rectangle)
+                        graphics.DrawRectangle(pen, screenBounds.X, screenBounds.Y, screenBounds.Width, screenBounds.Height);
+                    else
+                        graphics.DrawEllipse(pen, screenBounds);
+                }
+            }
+            graphics.Restore(state);
         }
 
         private void DrawTextPreview(Graphics graphics)
@@ -2296,6 +2364,26 @@ namespace LocalPhotoViewer
         private Color _navySoftColor()
         {
             return Color.FromArgb(Math.Min(255, _navy.R + 18), Math.Min(255, _navy.G + 20), Math.Min(255, _navy.B + 20));
+        }
+    }
+
+    internal static class AnnotationGeometry
+    {
+        public static Rectangle Bounds(Point start, Point end, FrameAnnotationShape shape)
+        {
+            int left = Math.Min(start.X, end.X);
+            int top = Math.Min(start.Y, end.Y);
+            int width = Math.Max(1, Math.Abs(end.X - start.X));
+            int height = Math.Max(1, Math.Abs(end.Y - start.Y));
+            if (shape == FrameAnnotationShape.Circle)
+            {
+                int side = Math.Max(1, Math.Min(width, height));
+                left = end.X < start.X ? start.X - side : start.X;
+                top = end.Y < start.Y ? start.Y - side : start.Y;
+                width = side;
+                height = side;
+            }
+            return new Rectangle(left, top, width, height);
         }
     }
 
