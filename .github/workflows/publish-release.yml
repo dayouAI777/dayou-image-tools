@@ -57,7 +57,10 @@ jobs:
       - name: Build application
         if: steps.existing.outputs.skip != 'true'
         shell: pwsh
+        env:
+          WINDIR: C:\\Windows
         run: |
+          Write-Host "Windows directory: $env:WINDIR"
           & $env:ComSpec /d /c build.cmd
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
