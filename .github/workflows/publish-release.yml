@@ -60,8 +60,9 @@ jobs:
         env:
           WINDIR: 'C:\Windows'
         run: |
-          Write-Host "Windows directory: $env:WINDIR"
-          & $env:ComSpec /d /c build.cmd
+          Write-Host "Windows directory: [$env:WINDIR]"
+          Write-Host "Command processor: [$env:ComSpec]"
+          & 'C:\Windows\System32\cmd.exe' /d /c build.cmd
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Create update package
