@@ -28,13 +28,18 @@ namespace DayouImageToolsUpdater
         private const string RepositoryName = "dayou-image-tools";
         private const long MaximumAssetSize = 2L * 1024L * 1024L * 1024L;
 
+        static GitHubReleaseClient()
+        {
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.SystemDefault;
+        }
+
         public static GitHubReleaseInfo GetLatestRelease()
         {
             string apiUrl = "https://api.github.com/repos/" + Uri.EscapeDataString(RepositoryOwner) + "/" + Uri.EscapeDataString(RepositoryName) + "/releases/latest";
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(apiUrl);
             request.Method = "GET";
             request.Accept = "application/vnd.github+json";
-            request.UserAgent = "DayouImageToolsUpdater/1.3.0";
+            request.UserAgent = "DayouImageToolsUpdater/1.3.1";
             request.Headers["X-GitHub-Api-Version"] = "2022-11-28";
             request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
             request.Timeout = 30000;
@@ -57,7 +62,10 @@ namespace DayouImageToolsUpdater
                     return null;
                 }
                 string detail = ReadErrorResponse(response);
-                throw new IOException("无法读取 GitHub Releases。" + (String.IsNullOrWhiteSpace(detail) ? "" : "\n" + detail), ex);
+                string diagnostic = ex.Status + "：" + ex.Message;
+                if (ex.InnerException != null && !String.IsNullOrWhiteSpace(ex.InnerException.Message))
+                    diagnostic += "（" + ex.InnerException.Message + "）";
+                throw new IOException("无法读取 GitHub Releases。网络诊断：" + diagnostic + (String.IsNullOrWhiteSpace(detail) ? "" : "\n" + detail), ex);
             }
 
             JavaScriptSerializer serializer = new JavaScriptSerializer { MaxJsonLength = 4 * 1024 * 1024 };
@@ -131,7 +139,7 @@ namespace DayouImageToolsUpdater
 
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(uri);
             request.Method = "GET";
-            request.UserAgent = "DayouImageToolsUpdater/1.3.0";
+            request.UserAgent = "DayouImageToolsUpdater/1.3.1";
             request.Accept = "application/octet-stream";
             request.Timeout = 30000;
             request.ReadWriteTimeout = 60000;
