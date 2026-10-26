@@ -41,7 +41,7 @@ run.cmd "D:\Pictures"
 
 ## 升级
 
-开始菜单提供“升级大有图片工具”。从 1.3.0 起，升级程序可通过公开 GitHub Releases 检查新版、显示更新说明、下载 `.dayouupdate` 并校验 GitHub 提供的 SHA-256 摘要；确认后再由本地部署器校验包内文件清单、备份旧文件并更新，失败时自动回滚。也可以继续选择本地 `.dayouupdate` 或 ZIP 包。初次获得在线更新功能，请先安装 Releases 中的 1.3.0 完整安装程序；此后日常版本可从更新中心在线更新。升级器自身仍通过完整安装程序升级。更新包制作脚本和规范见 `tools\make_update_package.py` 与 `UPDATE_PACKAGE_FORMAT.md`。
+开始菜单提供“升级大有图片工具”。从 1.3.0 起，升级程序可通过公开 GitHub Releases 检查新版、显示更新说明、下载 `.dayouupdate` 并校验 GitHub 提供的 SHA-256 摘要；确认后再由本地部署器校验包内文件清单、备份旧文件并更新，失败时自动回滚。1.3.1 修正了独立升级器的 .NET Framework TLS 目标配置，并在网络失败时显示连接诊断。也可以继续选择本地 `.dayouupdate` 或 ZIP 包。初次获得在线更新功能，请先安装 Releases 中的 1.3.0 或更新的完整安装程序；此后日常版本可从更新中心在线更新。升级器自身仍通过完整安装程序升级。更新包制作脚本和规范见 `tools\make_update_package.py` 与 `UPDATE_PACKAGE_FORMAT.md`。
 
 ### 发布在线更新
 
@@ -57,4 +57,4 @@ run.cmd "D:\Pictures"
 
 ## 构建
 
-双击 `build.cmd` 生成 x64 主程序和升级程序。如果 `third_party\Magick.NET` 中缺少运行库，构建脚本会从 NuGet 下载固定版本 15.0.0 并恢复所需 DLL。安装包由 Inno Setup 7 使用 `setup.iss` 生成。更新包可在构建后运行 `python tools\make_update_package.py --version 1.3.0`，输出到 `bin\大有图片工具_v1.3.0.dayouupdate`。构建使用 Windows 自带的 .NET Framework C# 编译器、WinForms、`System.Drawing` 和第三方 Magick.NET 解码库。第三方许可文本随安装包放在 `licenses` 文件夹中。
+双击 `build.cmd` 生成 x64 主程序和升级程序。如果 `third_party\Magick.NET` 中缺少运行库，构建脚本会从 NuGet 下载固定版本 15.0.0 并恢复所需 DLL。安装包由 Inno Setup 7 使用 `setup.iss` 生成。更新包可在构建后运行 `python tools\make_update_package.py --version 1.3.1`，输出到 `bin\大有图片工具_v1.3.1.dayouupdate`。构建使用 Windows 自带的 .NET Framework C# 编译器、WinForms、`System.Drawing` 和第三方 Magick.NET 解码库。第三方许可文本随安装包放在 `licenses` 文件夹中。
