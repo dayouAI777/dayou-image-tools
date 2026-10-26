@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 set "ROOT=%~dp0"
 set "CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if not exist "%CSC%" set "CSC=%WINDIR%\Microsoft.NET\Framework\v4.0.30319\csc.exe"
@@ -16,8 +16,8 @@ set "MAGICK=%ROOT%third_party\Magick.NET"
 set "FACADE=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\netstandard.dll"
 if not exist "%MAGICK%\Magick.NET-Q8-x64.dll" (
   set "PYTHON=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
-  if not exist "%PYTHON%" set "PYTHON=python"
-  "%PYTHON%" "%ROOT%tools\restore_magick.py"
+  if not exist "!PYTHON!" set "PYTHON=python"
+  "!PYTHON!" "%ROOT%tools\restore_magick.py"
   if errorlevel 1 exit /b 1
 )
 if not exist "%MAGICK%\Magick.NET-Q8-x64.dll" (
