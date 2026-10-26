@@ -57,19 +57,15 @@ jobs:
       - name: Build application
         if: steps.existing.outputs.skip != 'true'
         shell: pwsh
-        env:
-          WINDIR: 'C:\Windows'
         run: |
-          Write-Host "Windows directory: [$env:WINDIR]"
-          $script = Get-Content build.cmd -Raw
-          $script = $script.Replace('@echo off', '@echo on')
-          Set-Content build-debug.cmd $script -Encoding ascii
-          & 'C:\Windows\System32\cmd.exe' /d /c build-debug.cmd
+          & 'C:\Windows\System32\cmd.exe' /d /c build.cmd
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Create update package
         if: steps.existing.outputs.skip != 'true'
         shell: cmd
+        env:
+          PYTHONIOENCODING: utf-8
         run: python tools\make_update_package.py --version ${{ steps.version.outputs.version }}
 
       - name: Build installer
