@@ -45,7 +45,7 @@ run.cmd "D:\Pictures"
 
 ### 发布在线更新
 
-在 GitHub 上创建 `v主版本.次版本.修订号` 格式的正式 Release，并上传同版本 `.dayouupdate` 文件。桌面升级器从 `dayouAI777/dayou-image-tools` 的最新正式 Release 读取版本和更新说明；只有资产名以 `.dayouupdate` 结尾的包才会提供给程序下载。首次安装请使用 Release 中的完整安装程序。
+版本提交到 `main` 后，GitHub Actions 会自动构建并发布 Release，上传安装程序与 `.dayouupdate` 更新包。无需手工创建 Release 或上传附件。完整步骤、版本号需要同步的位置和常见故障处理见 [`RELEASE_PROCESS.md`](RELEASE_PROCESS.md)。
 
 ## 范围与限制
 
