@@ -61,8 +61,10 @@ jobs:
           WINDIR: 'C:\Windows'
         run: |
           Write-Host "Windows directory: [$env:WINDIR]"
-          Write-Host "Command processor: [$env:ComSpec]"
-          & 'C:\Windows\System32\cmd.exe' /d /c build.cmd
+          $script = Get-Content build.cmd -Raw
+          $script = $script.Replace('@echo off', '@echo on')
+          Set-Content build-debug.cmd $script -Encoding ascii
+          & 'C:\Windows\System32\cmd.exe' /d /c build-debug.cmd
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Create update package
