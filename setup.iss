@@ -1,5 +1,5 @@
 #define MyAppName "大有图片工具"
-#define MyAppVersion "1.3.1"
+#define MyAppVersion "1.3.2"
 #define MyAppExeName "DayouImageTools.exe"
 
 [Setup]
@@ -17,7 +17,7 @@ AllowNoIcons=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=bin
-OutputBaseFilename=大有图片工具_安装程序_v1.3.1
+OutputBaseFilename=大有图片工具_安装程序_v1.3.2
 SetupIconFile=DayouImageTools.ico
 UninstallDisplayName=大有图片工具
 UninstallDisplayIcon={app}\DayouImageTools.exe
@@ -26,7 +26,7 @@ Compression=lzma2
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
-VersionInfoVersion=1.3.1.0
+VersionInfoVersion=1.3.2.0
 VersionInfoProductName=大有图片工具
 VersionInfoCompany=大有
 CloseApplications=yes
