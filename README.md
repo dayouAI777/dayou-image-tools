@@ -57,4 +57,4 @@ run.cmd "D:\Pictures"
 
 ## 构建
 
-双击 `build.cmd` 生成 x64 主程序和升级程序。安装包由 Inno Setup 7 使用 `setup.iss` 生成。更新包可在构建后运行 `python tools\make_update_package.py --version 1.3.0`，输出到 `bin\大有图片工具_v1.3.0.dayouupdate`。构建使用 Windows 自带的 .NET Framework C# 编译器、WinForms、`System.Drawing` 和第三方 Magick.NET 解码库。第三方许可文本随安装包放在 `licenses` 文件夹中。
+双击 `build.cmd` 生成 x64 主程序和升级程序。如果 `third_party\Magick.NET` 中缺少运行库，构建脚本会从 NuGet 下载固定版本 15.0.0 并恢复所需 DLL。安装包由 Inno Setup 7 使用 `setup.iss` 生成。更新包可在构建后运行 `python tools\make_update_package.py --version 1.3.0`，输出到 `bin\大有图片工具_v1.3.0.dayouupdate`。构建使用 Windows 自带的 .NET Framework C# 编译器、WinForms、`System.Drawing` 和第三方 Magick.NET 解码库。第三方许可文本随安装包放在 `licenses` 文件夹中。

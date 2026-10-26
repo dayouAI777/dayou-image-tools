@@ -1,0 +1,8 @@
+bin/
+third_party/Magick.NET/package-core/
+third_party/Magick.NET/package-x64/
+third_party/Magick.NET/*.dll
+third_party/Magick.NET/Notice.txt
+*.user
+*.suo
+obj/
