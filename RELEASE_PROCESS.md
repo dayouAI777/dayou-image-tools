@@ -8,6 +8,14 @@
 
 因此，正常发布不需要手工创建 Release、上传附件、选择 Latest 标签，也不需要另做 ZIP。用户可以从 [最新版下载页](https://github.com/dayouAI777/dayou-image-tools/releases/latest) 获取完整安装程序；安装后，日常版本可以从软件的更新中心获取。
 
+## 陌生电脑安装与更新前提
+
+普通用户不需要安装 Visual Studio、Python、Inno Setup，也不需要运行调试命令。完整安装程序已经包含图片解码所需的 Magick.NET 运行库；程序当前面向 x64 Windows，升级器目标为 .NET Framework 4.8。Windows 11 和较新的 Windows 10 已包含 .NET Framework 4.8 或 4.8.1；旧版 Windows 可能需要先安装 4.8。微软的系统兼容表见 [.NET Framework 系统要求](https://learn.microsoft.com/en-us/dotnet/framework/get-started/system-requirements)。
+
+要在线检查和下载更新，该电脑还需要能连接 `api.github.com` 与 `github.com` 的 Release 下载地址。网络代理、防火墙或所在网络屏蔽 GitHub 时，图片查看和编辑本身仍可使用，但在线检查/下载可能失败；此时可从另一台能访问 GitHub 的电脑下载完整安装程序，或手动取得 `.dayouupdate` 包后在更新中心选择它。
+
+新电脑请直接安装 [最新版完整安装程序](https://github.com/dayouAI777/dayou-image-tools/releases/latest)。1.3.1 及更早版本的旧升级器需要完整安装一次 1.3.2 来修复自身；安装 1.3.2 后，后续版本可由更新中心处理。
+
 ## 发布新版本
 
 假设新版本是 `1.3.3`：
