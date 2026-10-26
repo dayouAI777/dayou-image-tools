@@ -1,0 +1,93 @@
+name: Build and publish releases
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-2025
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Read product version
+        id: version
+        shell: pwsh
+        run: |
+          $setup = Get-Content setup.iss -Raw
+          if ($setup -notmatch '#define MyAppVersion "([0-9]+\.[0-9]+\.[0-9]+)"') {
+            throw "Could not read MyAppVersion from setup.iss."
+          }
+          $version = $Matches[1]
+          $notes = "RELEASE_NOTES_v$version.md"
+          if (!(Test-Path $notes)) {
+            throw "Missing release notes: $notes"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+          "notes=$notes" >> $env:GITHUB_OUTPUT
+
+      - name: Skip if this version is already published
+        id: existing
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $releases = gh release list --repo $env:GITHUB_REPOSITORY --limit 100 --json tagName | ConvertFrom-Json
+          if ($releases.tagName -contains $env:RELEASE_TAG) {
+            "skip=true" >> $env:GITHUB_OUTPUT
+            Write-Host "Release $env:RELEASE_TAG already exists."
+          } else {
+            "skip=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Set up Python
+        if: steps.existing.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build application
+        if: steps.existing.outputs.skip != 'true'
+        shell: cmd
+        run: call build.cmd
+
+      - name: Create update package
+        if: steps.existing.outputs.skip != 'true'
+        shell: cmd
+        run: python tools\make_update_package.py --version ${{ steps.version.outputs.version }}
+
+      - name: Build installer
+        if: steps.existing.outputs.skip != 'true'
+        shell: cmd
+        run: ISCC.exe setup.iss
+
+      - name: Prepare English asset names
+        if: steps.existing.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          Copy-Item "bin\大有图片工具_安装程序_v$env:RELEASE_VERSION.exe" "bin\dayou-image-tools-setup-v$env:RELEASE_VERSION.exe"
+          Copy-Item "bin\大有图片工具_v$env:RELEASE_VERSION.dayouupdate" "bin\dayou-image-tools-v$env:RELEASE_VERSION.dayouupdate"
+
+      - name: Publish release and upload assets
+        if: steps.existing.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_NOTES: ${{ steps.version.outputs.notes }}
+        run: |
+          $installer = "bin\dayou-image-tools-setup-v$env:RELEASE_VERSION.exe"
+          $update = "bin\dayou-image-tools-v$env:RELEASE_VERSION.dayouupdate"
+          gh release create $env:RELEASE_TAG $installer $update --repo $env:GITHUB_REPOSITORY --title "大有图片工具 $env:RELEASE_VERSION" --notes-file $env:RELEASE_NOTES --latest --target $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
