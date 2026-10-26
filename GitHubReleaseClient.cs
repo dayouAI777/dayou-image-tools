@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -39,7 +40,7 @@ namespace DayouImageToolsUpdater
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(apiUrl);
             request.Method = "GET";
             request.Accept = "application/vnd.github+json";
-            request.UserAgent = "DayouImageToolsUpdater/1.3.1";
+            request.UserAgent = "DayouImageToolsUpdater/1.3.2";
             request.Headers["X-GitHub-Api-Version"] = "2022-11-28";
             request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
             request.Timeout = 30000;
@@ -77,7 +78,7 @@ namespace DayouImageToolsUpdater
 
             string tag = GetString(releaseData, "tag_name");
             Version version = ParseTagVersion(tag);
-            object[] assets = releaseData.ContainsKey("assets") ? releaseData["assets"] as object[] : null;
+            IEnumerable assets = releaseData.ContainsKey("assets") ? releaseData["assets"] as IEnumerable : null;
             Dictionary<string, object> updateAsset = null;
             if (assets != null)
             {
@@ -139,7 +140,7 @@ namespace DayouImageToolsUpdater
 
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(uri);
             request.Method = "GET";
-            request.UserAgent = "DayouImageToolsUpdater/1.3.1";
+            request.UserAgent = "DayouImageToolsUpdater/1.3.2";
             request.Accept = "application/octet-stream";
             request.Timeout = 30000;
             request.ReadWriteTimeout = 60000;
