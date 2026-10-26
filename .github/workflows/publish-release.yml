@@ -68,6 +68,13 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: python tools\make_update_package.py --version ${{ steps.version.outputs.version }}
 
+      - name: Restore Simplified Chinese installer language
+        if: steps.existing.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $languageFile = 'C:\Program Files (x86)\Inno Setup 6\Languages\ChineseSimplified.isl'
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl' -OutFile $languageFile
+
       - name: Build installer
         if: steps.existing.outputs.skip != 'true'
         shell: cmd
