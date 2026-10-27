@@ -6,6 +6,6 @@ using System.Runtime.Versioning;
 [assembly: AssemblyCompany("大有")]
 [assembly: AssemblyProduct("大有图片工具")]
 [assembly: AssemblyCopyright("Copyright © 大有")]
-[assembly: AssemblyVersion("1.3.3.0")]
-[assembly: AssemblyFileVersion("1.3.3.0")]
+[assembly: AssemblyVersion("1.3.4.0")]
+[assembly: AssemblyFileVersion("1.3.4.0")]
 [assembly: TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]

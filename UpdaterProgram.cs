@@ -222,6 +222,8 @@ namespace DayouImageToolsUpdater
 
     internal sealed class UpdaterForm : Form
     {
+        private const int MainShutdownTimeoutSeconds = 45;
+        private const int FileCopyMaximumAttempts = 8;
         private readonly string _installDirectory;
         private readonly string _mainPath;
         private readonly TextBox _packagePath;
@@ -580,8 +582,10 @@ namespace DayouImageToolsUpdater
 
         private string ApplyUpdate(string packagePath)
         {
+            AppendDiagnosticLog("开始应用更新包：" + packagePath);
             Action<string> log = delegate(string message)
             {
+                AppendDiagnosticLog(message);
                 try
                 {
                     BeginInvoke((MethodInvoker)delegate
@@ -624,7 +628,7 @@ namespace DayouImageToolsUpdater
                     if (File.Exists(destination))
                     {
                         Directory.CreateDirectory(Path.GetDirectoryName(backup));
-                        File.Copy(destination, backup, true);
+                        CopyFileWithRetry(destination, backup, true, "备份", log);
                         existed[relative] = true;
                     }
                     else
@@ -632,12 +636,13 @@ namespace DayouImageToolsUpdater
 
                     touched.Add(relative);
                     Directory.CreateDirectory(Path.GetDirectoryName(destination));
-                    File.Copy(stage, destination, true);
+                    CopyFileWithRetry(stage, destination, true, "部署", log);
                     log("已部署：" + file.Target);
                 }
             }
             catch (Exception updateError)
             {
+                AppendDiagnosticLog("更新失败，开始回滚：" + updateError);
                 List<string> rollbackErrors = new List<string>();
                 for (int i = touched.Count - 1; i >= 0; i--)
                 {
@@ -648,7 +653,7 @@ namespace DayouImageToolsUpdater
                         if (existed[relative])
                         {
                             string backup = Path.Combine(backupRoot, relative);
-                            if (File.Exists(backup)) File.Copy(backup, destination, true);
+                            if (File.Exists(backup)) CopyFileWithRetry(backup, destination, true, "回滚", log);
                         }
                         else if (File.Exists(destination))
                             File.Delete(destination);
@@ -656,6 +661,7 @@ namespace DayouImageToolsUpdater
                     catch (Exception rollbackError)
                     {
                         rollbackErrors.Add(relative + "：" + rollbackError.Message);
+                        AppendDiagnosticLog("回滚文件失败：" + relative + "；" + rollbackError);
                     }
                 }
                 if (rollbackErrors.Count > 0)
@@ -667,6 +673,7 @@ namespace DayouImageToolsUpdater
                 try { if (Directory.Exists(stagingRoot)) Directory.Delete(stagingRoot, true); } catch { }
             }
 
+            AppendDiagnosticLog("更新到版本 " + package.Version + " 已完成。");
             string restartMessage = "更新到版本 " + package.Version + " 已完成。旧文件备份在：\n" + backupRoot;
             try
             {
@@ -675,6 +682,7 @@ namespace DayouImageToolsUpdater
             }
             catch (Exception ex)
             {
+                AppendDiagnosticLog("自动重新启动主程序失败：" + ex);
                 restartMessage += "\n\n自动启动失败，请从桌面快捷方式启动程序。\n" + ex.Message;
             }
             return restartMessage;
@@ -683,6 +691,7 @@ namespace DayouImageToolsUpdater
         private void CloseRunningMain(Action<string> log)
         {
             List<Process> matching = new List<Process>();
+            bool inspectionFailed = false;
             string expected = Path.GetFullPath(_mainPath);
             foreach (Process process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(_mainPath)))
             {
@@ -694,10 +703,29 @@ namespace DayouImageToolsUpdater
                     else
                         process.Dispose();
                 }
-                catch
+                catch (Exception ex)
                 {
+                    bool hasExited = false;
+                    try
+                    {
+                        hasExited = process.HasExited;
+                    }
+                    catch { }
+
+                    if (!hasExited)
+                    {
+                        inspectionFailed = true;
+                        log("无法确认同名进程 PID " + SafeProcessId(process) + " 的程序路径：" + ex.Message);
+                    }
                     process.Dispose();
                 }
+            }
+
+            if (inspectionFailed)
+            {
+                foreach (Process process in matching)
+                    process.Dispose();
+                throw new IOException("无法确认所有大有图片工具进程是否已退出。请先保存并手动退出大有图片工具，再重新升级。");
             }
 
             if (matching.Count == 0)
@@ -705,32 +733,101 @@ namespace DayouImageToolsUpdater
             log("正在请求主程序保存并关闭…");
             foreach (Process process in matching)
             {
-                try { process.CloseMainWindow(); }
-                catch { }
+                try
+                {
+                    bool requested = process.CloseMainWindow();
+                    log("已向主程序 PID " + SafeProcessId(process) + (requested ? " 发送关闭请求。" : " 发送关闭请求失败，继续等待其退出。"));
+                }
+                catch (Exception ex)
+                {
+                    log("向主程序 PID " + SafeProcessId(process) + " 发送关闭请求时出错：" + ex.Message);
+                }
             }
 
-            DateTime deadline = DateTime.UtcNow.AddSeconds(20);
-            while (DateTime.UtcNow < deadline)
+            DateTime deadline = DateTime.UtcNow.AddSeconds(MainShutdownTimeoutSeconds);
+            HashSet<int> reportedStatusErrors = new HashSet<int>();
+            try
             {
-                bool anyRunning = false;
-                foreach (Process process in matching)
+                while (DateTime.UtcNow < deadline)
                 {
-                    try
+                    bool anyRunning = false;
+                    foreach (Process process in matching)
                     {
-                        process.Refresh();
-                        if (!process.HasExited) anyRunning = true;
+                        try
+                        {
+                            process.Refresh();
+                            if (!process.HasExited) anyRunning = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            // An unreadable state is not proof that the executable has exited.
+                            bool hasExited = false;
+                            try { hasExited = process.HasExited; }
+                            catch { }
+                            if (!hasExited)
+                            {
+                                anyRunning = true;
+                                int processId = SafeProcessId(process);
+                                if (reportedStatusErrors.Add(processId))
+                                    log("无法确认主程序 PID " + processId + " 是否已退出，将继续等待：" + ex.Message);
+                            }
+                        }
                     }
-                    catch { }
+                    if (!anyRunning)
+                        return;
+                    Thread.Sleep(250);
                 }
-                if (!anyRunning)
+            }
+            finally
+            {
+                foreach (Process process in matching)
+                    process.Dispose();
+            }
+
+            throw new IOException("主程序在 " + MainShutdownTimeoutSeconds + " 秒内没有关闭。请先保存编辑内容并手动退出大有图片工具，再重新升级。");
+        }
+
+        private static int SafeProcessId(Process process)
+        {
+            try { return process.Id; }
+            catch { return 0; }
+        }
+
+        private static void CopyFileWithRetry(string source, string destination, bool overwrite, string operation, Action<string> log)
+        {
+            for (int attempt = 1; attempt <= FileCopyMaximumAttempts; attempt++)
+            {
+                try
                 {
-                    foreach (Process process in matching) process.Dispose();
+                    File.Copy(source, destination, overwrite);
                     return;
                 }
-                Thread.Sleep(250);
+                catch (IOException ex)
+                {
+                    if (attempt == FileCopyMaximumAttempts) throw;
+                    log(operation + "文件时遇到短暂占用，" + attempt + "/" + FileCopyMaximumAttempts + " 次后重试：" + Path.GetFileName(destination) + "；" + ex.Message);
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    if (attempt == FileCopyMaximumAttempts) throw;
+                    log(operation + "文件时暂时无法访问，" + attempt + "/" + FileCopyMaximumAttempts + " 次后重试：" + Path.GetFileName(destination) + "；" + ex.Message);
+                }
+
+                Thread.Sleep(500 * attempt);
             }
-            foreach (Process process in matching) process.Dispose();
-            throw new IOException("主程序在 20 秒内没有关闭。请先保存编辑内容并退出大有图片工具，再重新升级。");
+        }
+
+        private static void AppendDiagnosticLog(string message)
+        {
+            try
+            {
+                string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "大有图片工具", "Logs");
+                Directory.CreateDirectory(directory);
+                string path = Path.Combine(directory, "updater-" + DateTime.Now.ToString("yyyyMMdd") + ".log");
+                string line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " " + message + Environment.NewLine;
+                File.AppendAllText(path, line, new UTF8Encoding(false));
+            }
+            catch { }
         }
 
         private static Version ParseVersion(string text)

@@ -16,7 +16,8 @@ PAYLOAD_FILES = (
     "Magick.Native-Q8-x64.dll",
     "DayouImageTools.ico",
 )
-MINIMUM_UPDATER_VERSION = "1.3.2"
+# Keep this aligned with the oldest updater that can safely apply the package.
+MINIMUM_UPDATER_VERSION = "1.3.4"
 
 
 def sha256(path: Path) -> str:
