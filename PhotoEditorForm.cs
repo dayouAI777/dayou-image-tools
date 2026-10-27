@@ -6,6 +6,7 @@ using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace LocalPhotoViewer
@@ -13,6 +14,7 @@ namespace LocalPhotoViewer
     internal enum EditorTool { View, Crop, Brush, Text, Arrow, Rectangle, Mosaic }
     internal enum BrushTipShape { Round, Square }
     internal enum FrameAnnotationShape { Rectangle, Circle, Ellipse }
+    internal enum WatermarkStyle { SoftShadow, Outline, Label, Stamp }
 
     internal sealed class PhotoEditorForm : Form
     {
@@ -37,6 +39,15 @@ namespace LocalPhotoViewer
         private readonly NumericUpDown _brushSize;
         private readonly ComboBox _brushShape;
         private readonly ComboBox _frameShape;
+        private readonly ComboBox _watermarkStyle;
+        private readonly CheckBox _watermarkTile;
+        private readonly NumericUpDown _watermarkAngle;
+        private readonly NumericUpDown _watermarkSpacing;
+        private readonly NumericUpDown _watermarkOpacity;
+        private readonly Label _watermarkStyleLabel;
+        private readonly Label _watermarkAngleLabel;
+        private readonly Label _watermarkSpacingLabel;
+        private readonly Label _watermarkOpacityLabel;
         private TabControl _sideTabs;
         private TabPage _cropPage;
         private TabPage _annotatePage;
@@ -57,17 +68,36 @@ namespace LocalPhotoViewer
         private Button _applyCropButton;
         private Button _cancelCropButton;
         private Button _applyWatermarkButton;
+        private Button _loadImageWatermarkButton;
+        private Button _applyImageWatermarkButton;
+        private Button _borderColorButton;
+        private Button _applyBorderButton;
         private Button _applyColorButton;
         private Button _applyFilterButton;
         private ComboBox _filterChoice;
+        private NumericUpDown _imageWatermarkOpacity;
+        private NumericUpDown _borderWidth;
+        private Label _imageWatermarkOpacityLabel;
         private TrackBar _brightnessTrack;
         private TrackBar _contrastTrack;
         private TrackBar _saturationTrack;
+        private TabPage _borderPage;
+        private ToolStrip _toolbar;
+        private MenuStrip _menu;
         private bool _updatingSideTabs;
         private Color _drawColor = Color.Red;
+        private Color _borderColor = Color.White;
         private readonly Label _status;
         private TextEditOverlay _textEditor;
+        private Bitmap _imageWatermark;
+        private Bitmap _filterPreview;
+        private bool _watermarkEditorActive;
+        private bool _imageWatermarkMode;
         private bool _hasUnsavedChanges;
+        private bool _processing;
+        private int _imageVersion;
+        private int _filterPreviewRequest;
+        private int _filterPreviewIndex = -1;
 
         public PhotoEditorForm(string sourcePath)
         {
@@ -87,12 +117,17 @@ namespace LocalPhotoViewer
             _canvas.Resize += delegate { UpdateTextPreview(); };
             _canvas.TextPreviewMoved += delegate { PositionTextEditor(); };
             _canvas.TextPreviewMoveCompleted += delegate { PositionTextEditor(); if (_textEditor != null) _textEditor.FocusEditorEnd(); };
+            _canvas.ImageWatermarkBoundsChanged += delegate
+            {
+                _status.Text = "拖动图片水印可移动，拖右下角手柄可等比例缩放。";
+                if (_applyImageWatermarkButton != null) _applyImageWatermarkButton.Enabled = true;
+            };
             FormClosing += EditorFormClosing;
 
-            MenuStrip menu = BuildMenu();
-            ToolStrip tools = BuildToolbar();
+            _menu = BuildMenu();
+            _toolbar = BuildToolbar();
             _status = new Label { Dock = DockStyle.Bottom, Height = 28, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0), BackColor = Color.FromArgb(245, 246, 248), ForeColor = Color.FromArgb(70, 75, 84) };
-            _annotationText = new TextBox { Text = "文字标注", Width = 120 };
+            _annotationText = new TextBox { Text = "我的图片", Width = 120 };
             _cropRatio = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 230 };
             _cropRatio.Items.AddRange(new object[] { "自由比例", "原图比例", "1:1", "4:3", "3:2", "16:9", "9:16", "3:4", "2:3", "5:4", "4:5", "自定义输出尺寸" });
             _cropRatio.SelectedIndex = 0;
@@ -130,6 +165,22 @@ namespace LocalPhotoViewer
             _frameShape.Items.AddRange(new object[] { "矩形", "圆形", "椭圆" });
             _frameShape.SelectedIndex = 0;
             _frameShape.SelectedIndexChanged += delegate { _canvas.FrameShape = (FrameAnnotationShape)_frameShape.SelectedIndex; _canvas.Invalidate(); };
+            _watermarkStyle = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 230 };
+            _watermarkStyle.Items.AddRange(new object[] { "柔影字", "描边字", "半透明底牌", "印章边框" });
+            _watermarkStyle.SelectedIndex = 0;
+            _watermarkStyle.SelectedIndexChanged += delegate { UpdateTextPreview(); };
+            _watermarkTile = new CheckBox { Text = "铺满全图", AutoSize = true };
+            _watermarkTile.CheckedChanged += delegate { _watermarkSpacing.Enabled = _watermarkTile.Checked; UpdateTextPreview(); };
+            _watermarkAngle = new NumericUpDown { Minimum = -90, Maximum = 90, Value = 0, Width = 78, TextAlign = HorizontalAlignment.Center, Increment = 5 };
+            _watermarkAngle.ValueChanged += delegate { UpdateTextPreview(); };
+            _watermarkSpacing = new NumericUpDown { Minimum = 80, Maximum = 2000, Value = 240, Width = 92, TextAlign = HorizontalAlignment.Center, Increment = 20, Enabled = false, ThousandsSeparator = true };
+            _watermarkSpacing.ValueChanged += delegate { UpdateTextPreview(); };
+            _watermarkOpacity = new NumericUpDown { Minimum = 10, Maximum = 100, Value = 72, Width = 78, TextAlign = HorizontalAlignment.Center, Increment = 5 };
+            _watermarkOpacity.ValueChanged += delegate { UpdateTextPreview(); };
+            _watermarkStyleLabel = new Label { Text = "样式", Location = new Point(14, 18), Width = 230, Height = 22 };
+            _watermarkAngleLabel = new Label { Text = "方向（°）", Location = new Point(14, 116), Width = 94, Height = 26, TextAlign = ContentAlignment.MiddleLeft };
+            _watermarkSpacingLabel = new Label { Text = "间距（px）", Location = new Point(14, 152), Width = 94, Height = 26, TextAlign = ContentAlignment.MiddleLeft };
+            _watermarkOpacityLabel = new Label { Text = "透明度（%）", Location = new Point(14, 188), Width = 94, Height = 26, TextAlign = ContentAlignment.MiddleLeft };
 
             Panel sidePanel = BuildSidePanel();
             SplitContainer split = new SplitContainer { Width = 1240, Height = 720, SplitterDistance = 940, FixedPanel = FixedPanel.Panel2, IsSplitterFixed = true, Panel1MinSize = 500, Panel2MinSize = 270, SplitterWidth = 2, BackColor = Mint, Dock = DockStyle.Fill };
@@ -139,9 +190,9 @@ namespace LocalPhotoViewer
             split.Panel2.Controls.Add(sidePanel);
             Controls.Add(split);
             Controls.Add(_status);
-            Controls.Add(tools);
-            Controls.Add(menu);
-            MainMenuStrip = menu;
+            Controls.Add(_toolbar);
+            Controls.Add(_menu);
+            MainMenuStrip = _menu;
             BackColor = Paper;
             ForeColor = Navy;
             ApplyEditorialTheme(this);
@@ -198,7 +249,7 @@ namespace LocalPhotoViewer
             AddButton(bar, "框选", delegate { SetTool(EditorTool.Rectangle); });
             AddButton(bar, "马赛克", delegate { SetTool(EditorTool.Mosaic); });
             AddButton(bar, "文字水印", OpenTextWatermarkOptions);
-            AddButton(bar, "图片水印", ApplyImageWatermark);
+            AddButton(bar, "图片水印", OpenImageWatermarkOptions);
             AddButton(bar, "边框", AddBorder);
             bar.Items.Add(new ToolStripSeparator());
             AddButton(bar, "滤镜", OpenFilterOptions);
@@ -264,11 +315,54 @@ namespace LocalPhotoViewer
             _frameShape.Location = new Point(58, 142);
             _frameShape.Visible = false;
             _annotatePage.Controls.Add(_frameShape);
-            _applyWatermarkButton = CreateActionButton("添加文字水印", 14, 194, 230, 38, true);
+            _watermarkStyleLabel.Visible = false;
+            _annotatePage.Controls.Add(_watermarkStyleLabel);
+            _watermarkStyle.Location = new Point(14, 42);
+            _watermarkStyle.Visible = false;
+            _annotatePage.Controls.Add(_watermarkStyle);
+            _watermarkTile.Location = new Point(14, 80);
+            _watermarkTile.Visible = false;
+            _annotatePage.Controls.Add(_watermarkTile);
+            _watermarkAngleLabel.Visible = false;
+            _annotatePage.Controls.Add(_watermarkAngleLabel);
+            _watermarkAngle.Location = new Point(112, 116);
+            _watermarkAngle.Visible = false;
+            _annotatePage.Controls.Add(_watermarkAngle);
+            _watermarkSpacingLabel.Visible = false;
+            _annotatePage.Controls.Add(_watermarkSpacingLabel);
+            _watermarkSpacing.Location = new Point(112, 152);
+            _watermarkSpacing.Visible = false;
+            _annotatePage.Controls.Add(_watermarkSpacing);
+            _watermarkOpacityLabel.Visible = false;
+            _annotatePage.Controls.Add(_watermarkOpacityLabel);
+            _watermarkOpacity.Location = new Point(112, 188);
+            _watermarkOpacity.Visible = false;
+            _annotatePage.Controls.Add(_watermarkOpacity);
+            _applyWatermarkButton = CreateActionButton("应用水印", 14, 270, 230, 38, true);
             _applyWatermarkButton.Click += ApplyTextWatermark;
             _annotatePage.Controls.Add(_applyWatermarkButton);
-            _annotateHelp = new Label { Location = new Point(14, 252), Width = 238, Height = 92, AutoSize = false, ForeColor = MutedInk };
+            _annotateHelp = new Label { Location = new Point(14, 318), Width = 238, Height = 112, AutoSize = false, ForeColor = MutedInk };
             _annotatePage.Controls.Add(_annotateHelp);
+            _loadImageWatermarkButton = CreateActionButton("加载水印图片…", 14, 438, 230, 34, false);
+            _loadImageWatermarkButton.Click += LoadImageWatermark;
+            _loadImageWatermarkButton.Visible = false;
+            _annotatePage.Controls.Add(_loadImageWatermarkButton);
+            _imageWatermarkOpacityLabel = new Label { Text = "透明度（%）", Location = new Point(14, 482), Width = 94, Height = 26, TextAlign = ContentAlignment.MiddleLeft, Visible = false };
+            _annotatePage.Controls.Add(_imageWatermarkOpacityLabel);
+            _imageWatermarkOpacity = new NumericUpDown { Minimum = 0, Maximum = 100, Value = 55, Width = 92, Location = new Point(112, 482), TextAlign = HorizontalAlignment.Center, Visible = false };
+            _imageWatermarkOpacity.ValueChanged += delegate
+            {
+                if (_imageWatermark != null)
+                {
+                    _canvas.SetImageWatermarkOpacity((int)_imageWatermarkOpacity.Value);
+                    _applyImageWatermarkButton.Enabled = true;
+                }
+            };
+            _annotatePage.Controls.Add(_imageWatermarkOpacity);
+            _applyImageWatermarkButton = CreateActionButton("应用图片水印", 14, 520, 230, 38, true);
+            _applyImageWatermarkButton.Click += ApplyImageWatermark;
+            _applyImageWatermarkButton.Visible = false;
+            _annotatePage.Controls.Add(_applyImageWatermarkButton);
             _sideTabs.TabPages.Add(_annotatePage);
 
             _colorPage = new TabPage("色彩");
@@ -284,6 +378,7 @@ namespace LocalPhotoViewer
             _filterChoice = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(14, 48), Width = 230 };
             _filterChoice.Items.AddRange(new object[] { "黑白", "暖色", "冷色", "复古", "鲜艳", "低饱和" });
             _filterChoice.SelectedIndex = 0;
+            _filterChoice.SelectedIndexChanged += delegate { UpdateFilterPreview(); };
             _colorPage.Controls.Add(_filterChoice);
             _applyFilterButton = CreateActionButton("应用滤镜", 14, 104, 230, 38, true);
             _applyFilterButton.Click += ApplySelectedFilter;
@@ -302,13 +397,44 @@ namespace LocalPhotoViewer
             restore.Click += delegate { RestoreOriginal(this, EventArgs.Empty); };
             _infoPage.Controls.Add(restore);
             _sideTabs.TabPages.Add(_infoPage);
+            _borderPage = new TabPage("边框");
+            AddSectionTitle(_borderPage, "边框宽度", 14, 18);
+            _borderWidth = new NumericUpDown { Minimum = 1, Maximum = 1000, Value = 24, Location = new Point(14, 48), Width = 230, ThousandsSeparator = true };
+            _borderPage.Controls.Add(_borderWidth);
+            AddSectionTitle(_borderPage, "边框颜色", 14, 100);
+            _borderColorButton = CreateActionButton("选择颜色…", 14, 130, 230, 36, false);
+            _borderColorButton.Click += ChooseBorderColor;
+            _borderColorButton.BackColor = _borderColor;
+            _borderPage.Controls.Add(_borderColorButton);
+            AddLabel(_borderPage, "确认宽度和颜色后，点击应用；边框会加在图片四周。", 14, 184, 238, 64);
+            _applyBorderButton = CreateActionButton("应用边框", 14, 258, 230, 38, true);
+            _applyBorderButton.Click += ApplyBorder;
+            _borderPage.Controls.Add(_applyBorderButton);
+            ApplyEditorialTheme(_borderPage);
             _sideTabs.SelectedIndexChanged += delegate
             {
                 if (_updatingSideTabs) return;
+                if (_sideTabs.SelectedTab == _borderPage)
+                {
+                    _canvas.ActiveTool = EditorTool.View;
+                    _canvas.ClearSelection();
+                    return;
+                }
+                if (_sideTabs.TabPages.Contains(_borderPage)) _sideTabs.TabPages.Remove(_borderPage);
                 if (_sideTabs.SelectedTab == _cropPage) SetTool(EditorTool.Crop);
                 else if (_sideTabs.SelectedTab == _annotatePage && _canvas.ActiveTool != EditorTool.Brush && _canvas.ActiveTool != EditorTool.Text && _canvas.ActiveTool != EditorTool.Arrow && _canvas.ActiveTool != EditorTool.Rectangle && _canvas.ActiveTool != EditorTool.Mosaic) SetTool(EditorTool.Brush);
                 else if (_sideTabs.SelectedTab == _colorPage) OpenColorOptions(this, EventArgs.Empty);
                 else if (_sideTabs.SelectedTab == _infoPage) SetTool(EditorTool.View);
+                if (_sideTabs.SelectedTab != _annotatePage && _imageWatermarkMode)
+                {
+                    _imageWatermarkMode = false;
+                    _canvas.SetImageWatermarkMode(false);
+                    _loadImageWatermarkButton.Visible = false;
+                    _imageWatermarkOpacityLabel.Visible = false;
+                    _imageWatermarkOpacity.Visible = false;
+                    _applyImageWatermarkButton.Visible = false;
+                }
+                if (_sideTabs.SelectedTab != _colorPage) ClearFilterPreview();
             };
 
             EditorialSidebarHeader header = new EditorialSidebarHeader { Dock = DockStyle.Top, Height = 104, BackColor = Paper };
@@ -453,6 +579,15 @@ namespace LocalPhotoViewer
             _frameShapeLabel.Visible = frame;
             _frameShape.Visible = frame;
             _applyWatermarkButton.Visible = false;
+            _watermarkStyleLabel.Visible = false;
+            _watermarkStyle.Visible = false;
+            _watermarkTile.Visible = false;
+            _watermarkAngleLabel.Visible = false;
+            _watermarkAngle.Visible = false;
+            _watermarkSpacingLabel.Visible = false;
+            _watermarkSpacing.Visible = false;
+            _watermarkOpacityLabel.Visible = false;
+            _watermarkOpacity.Visible = false;
             _annotateHelp.Visible = true;
 
             if (tool == EditorTool.Crop)
@@ -498,28 +633,49 @@ namespace LocalPhotoViewer
 
         private void OpenTextWatermarkOptions(object sender, EventArgs e)
         {
+            if (_textEditor != null && _watermarkEditorActive)
+            {
+                _textEditor.FocusEditorEnd();
+                return;
+            }
+            ClearFilterPreview();
             if (_textEditor != null) CommitTextEditor();
+            _imageWatermarkMode = false;
+            _canvas.SetImageWatermarkMode(false);
+            _loadImageWatermarkButton.Visible = _imageWatermarkOpacityLabel.Visible = _imageWatermarkOpacity.Visible = _applyImageWatermarkButton.Visible = false;
             _canvas.ActiveTool = EditorTool.View;
             _canvas.ClearSelection();
-            _annotationTextLabel.Text = "水印文字";
-            _annotationTextLabel.Visible = true;
-            _annotationText.Visible = true;
-            _drawColorButton.Visible = true;
+            _annotationTextLabel.Visible = false;
+            _annotationText.Visible = false;
+            _drawColorButton.Visible = false;
             _brushSizeLabel.Visible = false;
             _brushSize.Visible = false;
             _brushShapeLabel.Visible = false;
             _brushShape.Visible = false;
             _frameShapeLabel.Visible = false;
             _frameShape.Visible = false;
+            _watermarkStyleLabel.Visible = true;
+            _watermarkStyle.Visible = true;
+            _watermarkTile.Visible = true;
+            _watermarkAngleLabel.Visible = true;
+            _watermarkAngle.Visible = true;
+            _watermarkSpacingLabel.Visible = true;
+            _watermarkSpacing.Visible = true;
+            _watermarkOpacityLabel.Visible = true;
+            _watermarkOpacity.Visible = true;
             _applyWatermarkButton.Visible = true;
             _annotateHelp.Visible = true;
-            _annotateHelp.Text = "文字水印会放在图片右下方；颜色使用上方选定的标注颜色。";
-            ShowContext(_annotatePage, "TYPE / WATERMARK", "文字水印", "输入内容后再应用到图片");
+            _annotateHelp.Text = "在图片右下角输入并拖动水印框调整位置。可选样式、角度与透明度；勾选“铺满全图”后按间距重复排布。";
+            ShowContext(_annotatePage, "TYPE / WATERMARK", "文字水印", "输入文字、拖动位置，再选样式或全图铺排");
+            StartTextEditor(true);
         }
 
         private void OpenColorOptions(object sender, EventArgs e)
         {
+            ClearFilterPreview();
             if (_textEditor != null) CommitTextEditor();
+            _imageWatermarkMode = false;
+            _canvas.SetImageWatermarkMode(false);
             _canvas.ActiveTool = EditorTool.View;
             _canvas.ClearSelection();
             _brightnessLabel.Visible = _brightnessTrack.Visible = true;
@@ -533,6 +689,8 @@ namespace LocalPhotoViewer
         private void OpenFilterOptions(object sender, EventArgs e)
         {
             if (_textEditor != null) CommitTextEditor();
+            _imageWatermarkMode = false;
+            _canvas.SetImageWatermarkMode(false);
             _canvas.ActiveTool = EditorTool.View;
             _canvas.ClearSelection();
             _brightnessLabel.Visible = _brightnessTrack.Visible = false;
@@ -541,13 +699,86 @@ namespace LocalPhotoViewer
             _applyColorButton.Visible = false;
             _filterChoice.Visible = _applyFilterButton.Visible = true;
             ShowContext(_colorPage, "PRINT / FILTER", "滤镜", "选择适合图片的色彩预设");
+            UpdateFilterPreview();
         }
 
         private void ApplySelectedFilter(object sender, EventArgs e)
         {
-            int mode = _filterChoice.SelectedIndex + 1;
-            Commit(AdjustBitmap(_image, 0, mode == 5 ? 115 : 100, mode == 6 ? 45 : (mode == 5 ? 145 : 100), mode));
-            _status.Text = "已应用“" + _filterChoice.SelectedItem + "”滤镜。";
+            if (_processing || _filterPreview == null || _filterPreviewIndex != _filterChoice.SelectedIndex) return;
+            int selected = _filterChoice.SelectedIndex;
+            Bitmap applied = (Bitmap)_filterPreview.Clone();
+            ClearFilterPreview();
+            _canvas.PreviewImage = null;
+            Commit(applied);
+            _status.Text = "已应用“" + _filterChoice.Items[selected] + "”滤镜。";
+        }
+
+        private void UpdateFilterPreview()
+        {
+            if (_filterChoice == null || _filterChoice.SelectedIndex < 0 || _processing) return;
+            int request = ++_filterPreviewRequest;
+            int version = _imageVersion;
+            int selected = _filterChoice.SelectedIndex;
+            Bitmap snapshot = (Bitmap)_image.Clone();
+            if (_filterPreview != null) { _filterPreview.Dispose(); _filterPreview = null; }
+            _filterPreviewIndex = -1;
+            _canvas.PreviewImage = null;
+            if (_applyFilterButton != null) _applyFilterButton.Enabled = false;
+            _status.Text = "正在生成“" + _filterChoice.Items[selected] + "”滤镜预览…";
+            Task.Run(delegate
+            {
+                try
+                {
+                    int mode = selected + 1;
+                    return AdjustBitmap(snapshot, 0, mode == 5 ? 115 : 100, mode == 6 ? 45 : (mode == 5 ? 145 : 100), mode);
+                }
+                finally { snapshot.Dispose(); }
+            }).ContinueWith(delegate(Task<Bitmap> task)
+            {
+                Bitmap preview = task.Status == TaskStatus.RanToCompletion ? task.Result : null;
+                if (IsDisposed || Disposing)
+                {
+                    if (preview != null) preview.Dispose();
+                    return;
+                }
+                try
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        if (IsDisposed || Disposing || request != _filterPreviewRequest || version != _imageVersion || selected != _filterChoice.SelectedIndex)
+                        {
+                            if (preview != null) preview.Dispose();
+                            return;
+                        }
+                        if (task.IsFaulted)
+                        {
+                            if (preview != null) preview.Dispose();
+                            _applyFilterButton.Enabled = false;
+                            _status.Text = "滤镜预览失败：" + task.Exception.GetBaseException().Message;
+                            return;
+                        }
+                        _filterPreview = preview;
+                        _filterPreviewIndex = selected;
+                        _canvas.PreviewImage = _filterPreview;
+                        _canvas.Invalidate();
+                        _applyFilterButton.Enabled = true;
+                        _status.Text = "正在预览“" + _filterChoice.Items[selected] + "”；确认后点击“应用滤镜”。";
+                    });
+                }
+                catch (InvalidOperationException)
+                {
+                    if (preview != null) preview.Dispose();
+                }
+            });
+        }
+
+        private void ClearFilterPreview()
+        {
+            _filterPreviewRequest++;
+            _filterPreviewIndex = -1;
+            if (_filterPreview != null) { _filterPreview.Dispose(); _filterPreview = null; }
+            if (_canvas != null) { _canvas.PreviewImage = null; _canvas.Invalidate(); }
+            if (_applyFilterButton != null) _applyFilterButton.Enabled = false;
         }
 
         private static TrackBar CreateTrackBar(Control parent, int x, int y, int min, int max, int value)
@@ -616,6 +847,8 @@ namespace LocalPhotoViewer
 
         private void SetTool(EditorTool tool)
         {
+            _imageWatermarkMode = false;
+            if (_canvas != null) _canvas.SetImageWatermarkMode(false);
             UpdateToolContext(tool);
             if (tool == EditorTool.Text)
             {
@@ -659,24 +892,50 @@ namespace LocalPhotoViewer
 
         private void StartTextEditor()
         {
-            if (_textEditor != null) CommitTextEditor();
+            StartTextEditor(false);
+        }
+
+        private void StartTextEditor(bool watermark)
+        {
+            if (_textEditor != null)
+            {
+                if (_watermarkEditorActive == watermark)
+                {
+                    _textEditor.FocusEditorEnd();
+                    return;
+                }
+                CommitTextEditor();
+            }
+            _watermarkEditorActive = watermark;
             _canvas.ActiveTool = EditorTool.View;
             _canvas.ClearSelection();
 
             int width = Math.Max(320, Math.Min(520, _canvas.ClientSize.Width - 20));
             TextEditOverlay editor = new TextEditOverlay(width, _drawColor);
+            if (watermark)
+                editor.Editor.Text = String.IsNullOrWhiteSpace(_annotationText.Text) ? "我的图片" : _annotationText.Text;
             _textEditor = editor;
             editor.ApplyRequested += delegate { CommitTextEditor(); };
             editor.CancelRequested += delegate { CancelTextEditor(); };
             editor.ColorRequested += delegate { ChooseTextColor(); };
             editor.TextStyleChanged += delegate { UpdateTextPreview(); };
             editor.GeometryChanged += delegate { _canvas.SetTextPreviewBounds(editor.PreviewBounds); };
+            editor.Editor.TextChanged += delegate { if (_watermarkEditorActive) _annotationText.Text = editor.Editor.Text; };
 
             RectangleF imageBounds = _canvas.DisplayedImageBounds;
             float scale = Math.Max(0.01f, _canvas.DisplayScale);
             int previewWidth = Math.Max(1, Math.Min(_image.Width, (int)Math.Round(Math.Max(80, Math.Min(460, imageBounds.Width - 24)) / scale)));
             int previewHeight = Math.Max(1, Math.Min(_image.Height, (int)Math.Round(Math.Max(42, Math.Min(94, imageBounds.Height - 24)) / scale)));
-            Rectangle previewBounds = new Rectangle((_image.Width - previewWidth) / 2, (_image.Height - previewHeight) / 2, previewWidth, previewHeight);
+            Rectangle previewBounds;
+            if (watermark)
+            {
+                int margin = Math.Max(12, (int)Math.Ceiling(18f / scale));
+                int x = Math.Max(0, _image.Width - previewWidth - margin);
+                int y = Math.Max(0, _image.Height - previewHeight - margin);
+                previewBounds = new Rectangle(x, y, previewWidth, previewHeight);
+            }
+            else
+                previewBounds = new Rectangle((_image.Width - previewWidth) / 2, (_image.Height - previewHeight) / 2, previewWidth, previewHeight);
             _canvas.BeginTextPreview(previewBounds, editor.Editor.Text, editor.FontPixels, editor.FontFamilyName, editor.TextStyle, editor.TextColor, editor.ShadowEnabled);
             editor.SyncGeometry(previewBounds);
             _canvas.Controls.Add(editor);
@@ -684,13 +943,22 @@ namespace LocalPhotoViewer
             editor.BringToFront();
             UpdateTextPreview();
             editor.FocusEditor();
-            _status.Text = "文字实时预览；拖动虚线框移动、拖动控制点缩放，也可输入横X、纵Y、宽和高精确调整。";
+            _status.Text = watermark
+                ? "水印已在图片右下角预览；可直接输入文字，拖动水印框移动，右侧可切换样式或铺满全图。"
+                : "文字实时预览；拖动虚线框移动、拖动控制点缩放，也可输入横X、纵Y、宽和高精确调整。";
         }
 
         private void UpdateTextPreview()
         {
             if (_textEditor == null) return;
             _canvas.UpdateTextPreview(_textEditor.Editor.Text, _textEditor.FontPixels, _textEditor.FontFamilyName, _textEditor.TextStyle, _textEditor.TextColor, _textEditor.ShadowEnabled);
+            _canvas.SetWatermarkPreview(
+                _watermarkEditorActive,
+                _watermarkTile.Checked,
+                (int)_watermarkAngle.Value,
+                (int)_watermarkSpacing.Value,
+                (WatermarkStyle)Math.Max(0, _watermarkStyle.SelectedIndex),
+                (int)_watermarkOpacity.Value);
             PositionTextEditor();
         }
 
@@ -727,6 +995,8 @@ namespace LocalPhotoViewer
             TextEditOverlay editor = _textEditor;
             if (editor == null) return;
             _textEditor = null;
+            bool watermark = _watermarkEditorActive;
+            _watermarkEditorActive = false;
 
             string text = editor.Editor.Text;
             Rectangle previewBounds = _canvas.TextPreviewBoundsInImage;
@@ -735,6 +1005,11 @@ namespace LocalPhotoViewer
             FontStyle fontStyle = editor.TextStyle;
             Color textColor = editor.TextColor;
             bool shadowEnabled = editor.ShadowEnabled;
+            bool tile = _watermarkTile.Checked;
+            int angle = (int)_watermarkAngle.Value;
+            int spacing = (int)_watermarkSpacing.Value;
+            int opacity = (int)_watermarkOpacity.Value;
+            WatermarkStyle style = (WatermarkStyle)Math.Max(0, _watermarkStyle.SelectedIndex);
 
             _canvas.Controls.Remove(editor);
             _canvas.ClearTextPreview();
@@ -744,19 +1019,29 @@ namespace LocalPhotoViewer
                 Bitmap result = (Bitmap)_image.Clone();
                 using (Graphics g = Graphics.FromImage(result))
                 using (Font font = new Font(fontFamily, Math.Max(8, Math.Min(300, fontSize)), fontStyle, GraphicsUnit.Pixel))
-                using (Brush brush = new SolidBrush(textColor))
-                using (Brush shadow = new SolidBrush(Color.FromArgb(165, Color.Black)))
-                using (StringFormat format = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Near, Trimming = StringTrimming.Word })
                 {
                     g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-                    RectangleF textBounds = new RectangleF(previewBounds.X + 7, previewBounds.Y + 5, Math.Max(1, previewBounds.Width - 14), Math.Max(1, previewBounds.Height - 10));
-                    if (shadowEnabled)
+                    if (watermark)
                     {
-                        RectangleF shadowBounds = textBounds;
-                        shadowBounds.Offset(Math.Max(1, fontSize / 28f), Math.Max(1, fontSize / 28f));
-                        g.DrawString(text, font, shadow, shadowBounds, format);
+                        Color color = WatermarkRenderer.WithOpacity(textColor, opacity);
+                        WatermarkRenderer.Draw(g, text, font, color, style, shadowEnabled, previewBounds, tile, angle, spacing, _image.Size);
                     }
-                    g.DrawString(text, font, brush, textBounds, format);
+                    else
+                    {
+                        using (Brush brush = new SolidBrush(textColor))
+                        using (Brush shadow = new SolidBrush(Color.FromArgb(165, Color.Black)))
+                        using (StringFormat format = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Near, Trimming = StringTrimming.Word })
+                        {
+                            RectangleF textBounds = new RectangleF(previewBounds.X + 7, previewBounds.Y + 5, Math.Max(1, previewBounds.Width - 14), Math.Max(1, previewBounds.Height - 10));
+                            if (shadowEnabled)
+                            {
+                                RectangleF shadowBounds = textBounds;
+                                shadowBounds.Offset(Math.Max(1, fontSize / 28f), Math.Max(1, fontSize / 28f));
+                                g.DrawString(text, font, shadow, shadowBounds, format);
+                            }
+                            g.DrawString(text, font, brush, textBounds, format);
+                        }
+                    }
                 }
                 Commit(result);
             }
@@ -769,6 +1054,7 @@ namespace LocalPhotoViewer
             if (_textEditor == null) return;
             TextEditOverlay editor = _textEditor;
             _textEditor = null;
+            _watermarkEditorActive = false;
             _canvas.Controls.Remove(editor);
             _canvas.ClearTextPreview();
             editor.Dispose();
@@ -913,7 +1199,47 @@ namespace LocalPhotoViewer
 
         private void ApplyConvolution(bool sharpen)
         {
-            Commit(Convolve(_image, sharpen));
+            RunBitmapOperation(sharpen ? "正在锐化图片…" : "正在柔化图片…", delegate(Bitmap source) { return Convolve(source, sharpen); }, sharpen ? "锐化完成。" : "柔化完成。");
+        }
+
+        private async void RunBitmapOperation(string workingText, Func<Bitmap, Bitmap> operation, string completedText)
+        {
+            if (_processing) return;
+            ClearFilterPreview();
+            Bitmap snapshot = (Bitmap)_image.Clone();
+            SetProcessing(true, workingText);
+            Bitmap result = null;
+            try
+            {
+                result = await Task.Run(delegate { return operation(snapshot); });
+                snapshot.Dispose();
+                snapshot = null;
+                Commit(result);
+                result = null;
+                _status.Text = completedText;
+            }
+            catch (Exception ex)
+            {
+                _status.Text = "处理失败：" + ex.Message;
+                MessageBox.Show(this, ex.Message, "处理失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                if (snapshot != null) snapshot.Dispose();
+                if (result != null) result.Dispose();
+                SetProcessing(false, null);
+            }
+        }
+
+        private void SetProcessing(bool processing, string status)
+        {
+            _processing = processing;
+            if (_toolbar != null) _toolbar.Enabled = !processing;
+            if (_menu != null) _menu.Enabled = !processing;
+            foreach (Control control in Controls)
+                if (!Object.ReferenceEquals(control, _status) && !Object.ReferenceEquals(control, _toolbar) && !Object.ReferenceEquals(control, _menu)) control.Enabled = !processing;
+            UseWaitCursor = processing;
+            if (!String.IsNullOrEmpty(status)) _status.Text = status;
         }
 
         private void ApplyMosaic(List<Point> points)
@@ -995,59 +1321,149 @@ namespace LocalPhotoViewer
 
         private void ApplyTextWatermark(object sender, EventArgs e)
         {
-            string text = _annotationText.Text;
-            if (String.IsNullOrWhiteSpace(text)) text = "我的图片";
-            Bitmap result = (Bitmap)_image.Clone();
-            using (Graphics g = Graphics.FromImage(result))
-            using (Font font = new Font("Microsoft YaHei UI", Math.Max(18, _image.Width / 45f), FontStyle.Bold, GraphicsUnit.Pixel))
-            using (Brush brush = new SolidBrush(Color.FromArgb(150, _drawColor)))
+            if (_textEditor != null && _watermarkEditorActive) CommitTextEditor();
+            else StartTextEditor(true);
+        }
+
+        private void OpenImageWatermarkOptions(object sender, EventArgs e)
+        {
+            ClearFilterPreview();
+            if (_textEditor != null) CommitTextEditor();
+            _annotationTextLabel.Visible = false;
+            _annotationText.Visible = false;
+            _drawColorButton.Visible = false;
+            _brushSizeLabel.Visible = false;
+            _brushSize.Visible = false;
+            _brushShapeLabel.Visible = false;
+            _brushShape.Visible = false;
+            _frameShapeLabel.Visible = false;
+            _frameShape.Visible = false;
+            _watermarkStyleLabel.Visible = false;
+            _watermarkStyle.Visible = false;
+            _watermarkTile.Visible = false;
+            _watermarkAngleLabel.Visible = false;
+            _watermarkAngle.Visible = false;
+            _watermarkSpacingLabel.Visible = false;
+            _watermarkSpacing.Visible = false;
+            _watermarkOpacityLabel.Visible = false;
+            _watermarkOpacity.Visible = false;
+            _applyWatermarkButton.Visible = false;
+            _annotateHelp.Visible = true;
+            _annotateHelp.Text = "加载后可在图片上拖动水印；拖右下角手柄可等比例缩放。透明度可在右侧调节，确认位置后点击应用。";
+            _loadImageWatermarkButton.Visible = true;
+            _imageWatermarkOpacityLabel.Visible = _imageWatermarkOpacity.Visible = true;
+            _applyImageWatermarkButton.Visible = true;
+            _canvas.ActiveTool = EditorTool.View;
+            _canvas.ClearSelection();
+            _imageWatermarkMode = true;
+            _canvas.SetImageWatermarkMode(true);
+            ShowContext(_annotatePage, "IMAGE / WATERMARK", "图片水印", "拖动、缩放并调节透明度");
+            if (_imageWatermark == null) LoadImageWatermark(sender, e);
+            else
             {
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                SizeF size = g.MeasureString(text, font);
-                g.DrawString(text, font, brush, Math.Max(0, _image.Width - size.Width - 24), Math.Max(0, _image.Height - size.Height - 20));
+                _canvas.SetImageWatermarkPreview(_imageWatermark, _canvas.ImageWatermarkBoundsInImage, (int)_imageWatermarkOpacity.Value);
+                _canvas.SetImageWatermarkMode(true);
+                _applyImageWatermarkButton.Enabled = true;
             }
-            Commit(result);
+        }
+
+        private void LoadImageWatermark(object sender, EventArgs e)
+        {
+            using (OpenFileDialog dialog = new OpenFileDialog { Title = "选择图片水印", Filter = "图片|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff|所有文件|*.*" })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                try
+                {
+                    using (Image loaded = Image.FromFile(dialog.FileName))
+                    {
+                        Bitmap mark = new Bitmap(loaded);
+                        if (_imageWatermark != null) _imageWatermark.Dispose();
+                        _imageWatermark = mark;
+                    }
+                    double aspect = (double)_imageWatermark.Width / Math.Max(1, _imageWatermark.Height);
+                    double scale = Math.Min(1d, Math.Min(Math.Max(1, _image.Width / 3) / (double)_imageWatermark.Width, _image.Height / (double)_imageWatermark.Height));
+                    int width = Math.Max(1, Math.Min(_image.Width, (int)Math.Round(_imageWatermark.Width * scale)));
+                    int height = Math.Max(1, Math.Min(_image.Height, (int)Math.Round(width / aspect)));
+                    Rectangle bounds = new Rectangle(Math.Max(0, _image.Width - width - 18), Math.Max(0, _image.Height - height - 18), width, height);
+                    _canvas.SetImageWatermarkPreview(_imageWatermark, bounds, (int)_imageWatermarkOpacity.Value);
+                    _canvas.SetImageWatermarkMode(true);
+                    _imageWatermarkMode = true;
+                    _applyImageWatermarkButton.Enabled = true;
+                    _status.Text = "水印已加载；可拖动位置、缩放大小并调节透明度。";
+                }
+                catch (Exception ex) { MessageBox.Show(this, "无法加载水印图片：\n" + ex.Message, "加载失败", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            }
         }
 
         private void ApplyImageWatermark(object sender, EventArgs e)
         {
-            using (OpenFileDialog dialog = new OpenFileDialog { Title = "选择透明 PNG 水印", Filter = "图片|*.png;*.jpg;*.jpeg;*.bmp|所有文件|*.*" })
+            if (_imageWatermark == null || _processing) return;
+            Bitmap mark = (Bitmap)_imageWatermark.Clone();
+            Rectangle bounds = _canvas.ImageWatermarkBoundsInImage;
+            int opacity = (int)_imageWatermarkOpacity.Value;
+            _imageWatermarkMode = false;
+            _canvas.SetImageWatermarkMode(false);
+            _canvas.ClearImageWatermarkPreview();
+            _applyImageWatermarkButton.Enabled = false;
+            RunBitmapOperation("正在应用图片水印…", delegate(Bitmap source)
             {
-                if (dialog.ShowDialog(this) != DialogResult.OK) return;
-                using (Image mark = Image.FromFile(dialog.FileName))
+                try
                 {
-                    Bitmap result = (Bitmap)_image.Clone();
-                    int w = Math.Min(result.Width / 3, mark.Width);
-                    int h = Math.Max(1, (int)(mark.Height * (w / (double)Math.Max(1, mark.Width))));
-                    using (Graphics g = Graphics.FromImage(result))
-                    using (ImageAttributes attr = new ImageAttributes())
+                    Bitmap result = (Bitmap)source.Clone();
+                    using (Graphics graphics = Graphics.FromImage(result))
+                    using (ImageAttributes attributes = new ImageAttributes())
                     {
                         ColorMatrix matrix = new ColorMatrix();
-                        matrix.Matrix33 = 0.55f;
-                        attr.SetColorMatrix(matrix);
-                        g.DrawImage(mark, new Rectangle(result.Width - w - 18, result.Height - h - 18, w, h), 0, 0, mark.Width, mark.Height, GraphicsUnit.Pixel, attr);
+                        matrix.Matrix33 = opacity / 100f;
+                        attributes.SetColorMatrix(matrix);
+                        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        graphics.DrawImage(mark, bounds, 0, 0, mark.Width, mark.Height, GraphicsUnit.Pixel, attributes);
                     }
-                    Commit(result);
+                    return result;
                 }
-            }
+                finally { mark.Dispose(); }
+            }, "图片水印已应用。" );
         }
 
         private void AddBorder(object sender, EventArgs e)
         {
-            using (NumericDialog dialog = new NumericDialog("边框宽度", "边框像素", 24, 1, 1000))
-            using (ColorDialog color = new ColorDialog { Color = Color.White })
+            ClearFilterPreview();
+            if (_textEditor != null) CommitTextEditor();
+            _imageWatermarkMode = false;
+            _canvas.SetImageWatermarkMode(false);
+            _canvas.ActiveTool = EditorTool.View;
+            _canvas.ClearSelection();
+            if (!_sideTabs.TabPages.Contains(_borderPage)) _sideTabs.TabPages.Add(_borderPage);
+            ShowContext(_borderPage, "FRAME / BORDER", "边框", "设置边宽和颜色，再应用到图片");
+        }
+
+        private void ChooseBorderColor(object sender, EventArgs e)
+        {
+            using (ColorDialog dialog = new ColorDialog { Color = _borderColor, FullOpen = true })
             {
-                if (dialog.ShowDialog(this) != DialogResult.OK || color.ShowDialog(this) != DialogResult.OK) return;
-                int width = dialog.Value;
-                Bitmap result = new Bitmap(_image.Width + width * 2, _image.Height + width * 2, PixelFormat.Format32bppArgb);
-                using (Graphics g = Graphics.FromImage(result))
-                {
-                    g.Clear(color.Color);
-                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                    g.DrawImage(_image, new Rectangle(width, width, _image.Width, _image.Height));
-                }
-                Commit(result);
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                _borderColor = dialog.Color;
+                _borderColorButton.BackColor = _borderColor;
+                _borderColorButton.ForeColor = _borderColor.GetBrightness() < 0.48f ? Color.White : Navy;
+                _borderColorButton.Text = "颜色 #" + _borderColor.R.ToString("X2") + _borderColor.G.ToString("X2") + _borderColor.B.ToString("X2");
             }
+        }
+
+        private void ApplyBorder(object sender, EventArgs e)
+        {
+            int width = (int)_borderWidth.Value;
+            Color color = _borderColor;
+            RunBitmapOperation("正在添加边框…", delegate(Bitmap source)
+            {
+                Bitmap result = new Bitmap(source.Width + width * 2, source.Height + width * 2, PixelFormat.Format32bppArgb);
+                using (Graphics graphics = Graphics.FromImage(result))
+                {
+                    graphics.Clear(color);
+                    graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    graphics.DrawImage(source, new Rectangle(width, width, source.Width, source.Height));
+                }
+                return result;
+            }, "边框已添加。" );
         }
 
         private void ChooseColor()
@@ -1068,7 +1484,9 @@ namespace LocalPhotoViewer
         private void Commit(Bitmap next)
         {
             if (next == null) return;
+            ClearFilterPreview();
             _hasUnsavedChanges = true;
+            _imageVersion++;
             _undo.Add((Bitmap)_image.Clone());
             while (_undo.Count > 12) { _undo[0].Dispose(); _undo.RemoveAt(0); }
             ClearStack(_redo);
@@ -1082,7 +1500,9 @@ namespace LocalPhotoViewer
         private void Undo(object sender, EventArgs e)
         {
             if (_undo.Count == 0) return;
+            ClearFilterPreview();
             _hasUnsavedChanges = true;
+            _imageVersion++;
             _redo.Add((Bitmap)_image.Clone());
             _image.Dispose();
             _image = _undo[_undo.Count - 1];
@@ -1095,7 +1515,9 @@ namespace LocalPhotoViewer
         private void Redo(object sender, EventArgs e)
         {
             if (_redo.Count == 0) return;
+            ClearFilterPreview();
             _hasUnsavedChanges = true;
+            _imageVersion++;
             _undo.Add((Bitmap)_image.Clone());
             _image.Dispose();
             _image = _redo[_redo.Count - 1];
@@ -1144,6 +1566,12 @@ namespace LocalPhotoViewer
 
         private void EditorFormClosing(object sender, FormClosingEventArgs e)
         {
+            if (_processing)
+            {
+                e.Cancel = true;
+                _status.Text = "图片仍在处理中，请等待处理完成后再关闭编辑器。";
+                return;
+            }
             bool pendingText = _textEditor != null && !String.IsNullOrWhiteSpace(_textEditor.Editor.Text);
             if (!_hasUnsavedChanges && !pendingText) return;
             DialogResult result = MessageBox.Show(this, "图片有尚未保存的修改。是否保存为副本？", Text, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
@@ -1171,6 +1599,7 @@ namespace LocalPhotoViewer
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            if (_processing) return true;
             if (_textEditor != null)
             {
                 if ((keyData & Keys.KeyCode) == Keys.Escape) { CancelTextEditor(); return true; }
@@ -1186,6 +1615,8 @@ namespace LocalPhotoViewer
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            ClearFilterPreview();
+            if (_imageWatermark != null) { _imageWatermark.Dispose(); _imageWatermark = null; }
             if (_textEditor != null)
             {
                 TextEditOverlay editor = _textEditor;
@@ -1295,34 +1726,193 @@ namespace LocalPhotoViewer
         private static Bitmap Convolve(Bitmap source, bool sharpen)
         {
             Bitmap src = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
-            using (Graphics g = Graphics.FromImage(src)) g.DrawImage(source, 0, 0, source.Width, source.Height);
+            using (Graphics graphics = Graphics.FromImage(src)) graphics.DrawImage(source, 0, 0, source.Width, source.Height);
             Bitmap result = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
-            BitmapData sd = src.LockBits(new Rectangle(0, 0, src.Width, src.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-            BitmapData rd = result.LockBits(new Rectangle(0, 0, result.Width, result.Height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
-            int len = Math.Abs(sd.Stride) * sd.Height;
-            byte[] input = new byte[len]; byte[] output = new byte[len];
-            Marshal.Copy(sd.Scan0, input, 0, len);
-            int[] kernel = sharpen ? new int[] { 0,-1,0,-1,5,-1,0,-1,0 } : new int[] { 1,1,1,1,1,1,1,1,1 };
-            int divisor = sharpen ? 1 : 9;
-            for (int y = 0; y < src.Height; y++) for (int x = 0; x < src.Width; x++)
+            Rectangle bounds = new Rectangle(0, 0, src.Width, src.Height);
+            BitmapData inputData = null;
+            BitmapData outputData = null;
+            bool completed = false;
+            try
             {
-                int dst = y * sd.Stride + x * 4;
-                for (int c = 0; c < 3; c++)
+                inputData = src.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                outputData = result.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+                int rowBytes = checked(src.Width * 4);
+                byte[] input = new byte[checked(rowBytes * src.Height)];
+                for (int y = 0; y < src.Height; y++)
+                    Marshal.Copy(IntPtr.Add(inputData.Scan0, y * inputData.Stride), input, y * rowBytes, rowBytes);
+
+                Parallel.For<byte[]>(0, src.Height,
+                delegate { return new byte[rowBytes]; },
+                delegate(int y, ParallelLoopState state, byte[] row)
                 {
-                    int sum = 0, ki = 0;
-                    for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++, ki++)
+                    int topY = Math.Max(0, y - 1) * rowBytes;
+                    int midY = y * rowBytes;
+                    int bottomY = Math.Min(src.Height - 1, y + 1) * rowBytes;
+                    for (int x = 0; x < src.Width; x++)
                     {
-                        int sx = Math.Max(0, Math.Min(src.Width - 1, x + dx));
-                        int sy = Math.Max(0, Math.Min(src.Height - 1, y + dy));
-                        sum += input[sy * sd.Stride + sx * 4 + c] * kernel[ki];
+                        int offset = x * 4;
+                        int left = Math.Max(0, x - 1) * 4;
+                        int right = Math.Min(src.Width - 1, x + 1) * 4;
+                        for (int channel = 0; channel < 3; channel++)
+                        {
+                            int value;
+                            if (sharpen)
+                                value = input[midY + offset + channel] * 5 - input[midY + left + channel] - input[midY + right + channel] - input[topY + offset + channel] - input[bottomY + offset + channel];
+                            else
+                            {
+                                int sum = 0;
+                                for (int dy = -1; dy <= 1; dy++)
+                                {
+                                    int rowOffset = (dy < 0 ? topY : (dy > 0 ? bottomY : midY));
+                                    for (int dx = -1; dx <= 1; dx++)
+                                        sum += input[rowOffset + Math.Max(0, Math.Min(src.Width - 1, x + dx)) * 4 + channel];
+                                }
+                                value = (sum + 4) / 9;
+                            }
+                            row[offset + channel] = (byte)Math.Max(0, Math.Min(255, value));
+                        }
+                        row[offset + 3] = input[midY + offset + 3];
                     }
-                    output[dst + c] = ClampByte(sum / (double)divisor);
-                }
-                output[dst + 3] = input[dst + 3];
+                    Marshal.Copy(row, 0, IntPtr.Add(outputData.Scan0, y * outputData.Stride), rowBytes);
+                    return row;
+                },
+                delegate(byte[] row) { });
+                completed = true;
             }
-            Marshal.Copy(output, 0, rd.Scan0, len);
-            src.UnlockBits(sd); result.UnlockBits(rd); src.Dispose();
+            finally
+            {
+                if (outputData != null) result.UnlockBits(outputData);
+                if (inputData != null) src.UnlockBits(inputData);
+                src.Dispose();
+                if (!completed) result.Dispose();
+            }
             return result;
+        }
+    }
+
+    internal static class WatermarkRenderer
+    {
+        public static Color WithOpacity(Color color, int opacity)
+        {
+            int percent = Math.Max(0, Math.Min(100, opacity));
+            return Color.FromArgb(color.A * percent / 100, color.R, color.G, color.B);
+        }
+
+        public static void Draw(Graphics graphics, string text, Font font, Color color, WatermarkStyle style, bool shadow, Rectangle anchor, bool tiled, int angle, int spacing, Size imageSize)
+        {
+            if (graphics == null || font == null || String.IsNullOrWhiteSpace(text)) return;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            if (!tiled)
+            {
+                RectangleF bounds = new RectangleF(anchor.X + 7, anchor.Y + 5, Math.Max(1, anchor.Width - 14), Math.Max(1, anchor.Height - 10));
+                DrawOne(graphics, text, font, color, style, shadow, bounds, angle);
+                return;
+            }
+
+            SizeF measured = graphics.MeasureString(text, font);
+            int gap = Math.Max(20, spacing);
+            int stepX = Math.Max(1, (int)Math.Ceiling(measured.Width) + gap);
+            int stepY = Math.Max(1, (int)Math.Ceiling(measured.Height) + gap);
+            int startX = PositiveModulo(anchor.X, stepX) - stepX;
+            int startY = PositiveModulo(anchor.Y, stepY) - stepY;
+            float width = Math.Max(font.Size * 2f, measured.Width + 4f);
+            float height = Math.Max(font.Size * 1.4f, measured.Height + 4f);
+            for (int y = startY; y < imageSize.Height + stepY; y += stepY)
+                for (int x = startX; x < imageSize.Width + stepX; x += stepX)
+                    DrawOne(graphics, text, font, color, style, shadow, new RectangleF(x, y, width, height), angle);
+        }
+
+        private static int PositiveModulo(int value, int divisor)
+        {
+            int result = value % divisor;
+            return result < 0 ? result + divisor : result;
+        }
+
+        private static void DrawOne(Graphics graphics, string text, Font font, Color color, WatermarkStyle style, bool shadow, RectangleF bounds, int angle)
+        {
+            GraphicsState state = graphics.Save();
+            graphics.TranslateTransform(bounds.X, bounds.Y);
+            if (angle != 0) graphics.RotateTransform(angle);
+            RectangleF local = new RectangleF(0, 0, Math.Max(1, bounds.Width), Math.Max(1, bounds.Height));
+            using (StringFormat format = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Near, Trimming = StringTrimming.Word })
+            using (Brush textBrush = new SolidBrush(color))
+            {
+                if (style == WatermarkStyle.Label)
+                {
+                    SizeF measured = graphics.MeasureString(text, font);
+                    float padX = Math.Max(5, font.Size * 0.18f);
+                    float padY = Math.Max(3, font.Size * 0.12f);
+                    RectangleF label = new RectangleF(-padX, -padY, measured.Width + padX * 2, measured.Height + padY * 2);
+                    Color backdrop = color.GetBrightness() > 0.5f ? Color.Black : Color.White;
+                    using (Brush background = new SolidBrush(Color.FromArgb((int)color.A * 3 / 4, backdrop)))
+                    using (GraphicsPath rounded = RoundedRectangle(label, Math.Max(4, font.Size * 0.2f)))
+                        graphics.FillPath(background, rounded);
+                    graphics.DrawString(text, font, textBrush, PointF.Empty, format);
+                }
+                else if (style == WatermarkStyle.Outline || style == WatermarkStyle.Stamp)
+                {
+                    using (GraphicsPath path = new GraphicsPath())
+                    {
+                        path.AddString(text, font.FontFamily, (int)font.Style, font.Size, local, format);
+                        Color outlineColor = color.GetBrightness() < 0.45f ? Color.White : Color.Black;
+                        int outlineAlpha = (int)color.A;
+                        using (Pen outline = new Pen(Color.FromArgb(outlineAlpha, outlineColor), Math.Max(1.5f, font.Size / (style == WatermarkStyle.Stamp ? 18f : 24f))) { LineJoin = LineJoin.Round })
+                        {
+                            if (shadow)
+                            {
+                                using (Pen shadowPen = new Pen(Color.FromArgb((int)color.A * 3 / 4, Color.Black), Math.Max(1f, font.Size / 18f)) { LineJoin = LineJoin.Round })
+                                {
+                                    GraphicsState shadowState = graphics.Save();
+                                    graphics.TranslateTransform(Math.Max(1, font.Size / 30f), Math.Max(1, font.Size / 30f));
+                                    graphics.DrawPath(shadowPen, path);
+                                    graphics.Restore(shadowState);
+                                }
+                            }
+                            graphics.DrawPath(outline, path);
+                        }
+                        graphics.FillPath(textBrush, path);
+                    }
+                    if (style == WatermarkStyle.Stamp)
+                    {
+                        SizeF measured = graphics.MeasureString(text, font);
+                        RectangleF frame = RectangleF.Inflate(new RectangleF(0, 0, measured.Width, measured.Height), font.Size * 0.16f, font.Size * 0.12f);
+                        using (Pen stampPen = new Pen(Color.FromArgb((int)color.A, PhotoEditorForm.Coral), Math.Max(1f, font.Size / 24f)))
+                            graphics.DrawRectangle(stampPen, frame.X, frame.Y, frame.Width, frame.Height);
+                    }
+                }
+                else
+                {
+                    if (shadow)
+                    {
+                        using (Brush shadowBrush = new SolidBrush(Color.FromArgb((int)color.A * 3 / 4, Color.Black)))
+                        {
+                            RectangleF shadowBounds = local;
+                            float offset = Math.Max(1, font.Size / 28f);
+                            shadowBounds.Offset(offset, offset);
+                            graphics.DrawString(text, font, shadowBrush, shadowBounds, format);
+                        }
+                    }
+                    graphics.DrawString(text, font, textBrush, local, format);
+                }
+            }
+            graphics.Restore(state);
+        }
+
+        private static GraphicsPath RoundedRectangle(RectangleF bounds, float radius)
+        {
+            GraphicsPath path = new GraphicsPath();
+            float diameter = Math.Min(Math.Min(bounds.Width, bounds.Height), Math.Max(1, radius * 2));
+            RectangleF arc = new RectangleF(bounds.X, bounds.Y, diameter, diameter);
+            path.AddArc(arc, 180, 90);
+            arc.X = bounds.Right - diameter;
+            path.AddArc(arc, 270, 90);
+            arc.Y = bounds.Bottom - diameter;
+            path.AddArc(arc, 0, 90);
+            arc.X = bounds.Left;
+            path.AddArc(arc, 90, 90);
+            path.CloseFigure();
+            return path;
         }
     }
 
@@ -1338,11 +1928,26 @@ namespace LocalPhotoViewer
         private CropHandle _activeCropHandle;
         private CropDragMode _cropDragMode;
         private bool _textPreviewActive;
+        private bool _watermarkPreviewActive;
+        private bool _watermarkPreviewTiled;
+        private int _watermarkPreviewAngle;
+        private int _watermarkPreviewSpacing;
+        private int _watermarkPreviewOpacity;
+        private WatermarkStyle _watermarkPreviewStyle;
         private bool _movingTextPreview;
         private bool _resizingTextPreview;
         private CropHandle _textResizeHandle;
         private Point _textDragStart;
         private Rectangle _textDragStartBounds;
+        private Bitmap _imageWatermarkPreview;
+        private Rectangle _imageWatermarkBounds;
+        private int _imageWatermarkOpacity = 55;
+        private bool _imageWatermarkPreviewActive;
+        private bool _imageWatermarkMode;
+        private bool _movingImageWatermark;
+        private bool _resizingImageWatermark;
+        private Point _imageWatermarkDragStart;
+        private Rectangle _imageWatermarkDragStartBounds;
         private Point _mousePosition;
         private bool _hasMousePosition;
         private Bitmap _liveMosaicBitmap;
@@ -1350,6 +1955,7 @@ namespace LocalPhotoViewer
         private float _scale = 1f;
         private PointF _offset;
         public Bitmap Image { get; set; }
+        public Bitmap PreviewImage { get; set; }
         public EditorTool ActiveTool { get; set; }
         public double AspectRatio { get; set; }
         public int BrushSize { get; set; }
@@ -1360,6 +1966,7 @@ namespace LocalPhotoViewer
         public float DisplayScale { get { UpdateImageTransform(); return _scale; } }
         public RectangleF DisplayedImageBounds { get { UpdateImageTransform(); return ImageScreenBounds(); } }
         public Rectangle TextPreviewBoundsInImage { get; private set; }
+        public Rectangle ImageWatermarkBoundsInImage { get { return _imageWatermarkBounds; } }
         public string TextPreview { get; private set; }
         public int TextPreviewFontPixels { get; private set; }
         public string TextPreviewFontFamily { get; private set; }
@@ -1369,6 +1976,7 @@ namespace LocalPhotoViewer
         public event Action<EditorTool, Point, Point, List<Point>> ToolCompleted;
         public event Action<Rectangle> TextPreviewMoved;
         public event EventHandler TextPreviewMoveCompleted;
+        public event Action<Rectangle> ImageWatermarkBoundsChanged;
 
         public PhotoEditCanvas()
         {
@@ -1382,6 +1990,56 @@ namespace LocalPhotoViewer
         }
 
         public void ClearSelection() { SelectionInImage = Rectangle.Empty; Invalidate(); }
+
+        public void SetImageWatermarkPreview(Bitmap image, Rectangle bounds, int opacity)
+        {
+            _imageWatermarkPreview = image;
+            _imageWatermarkBounds = ClampImageWatermarkBounds(bounds);
+            _imageWatermarkOpacity = Math.Max(0, Math.Min(100, opacity));
+            _imageWatermarkPreviewActive = image != null;
+            Invalidate();
+        }
+
+        public void SetImageWatermarkOpacity(int opacity)
+        {
+            _imageWatermarkOpacity = Math.Max(0, Math.Min(100, opacity));
+            Invalidate();
+        }
+
+        public void SetImageWatermarkMode(bool enabled)
+        {
+            _imageWatermarkMode = enabled && _imageWatermarkPreview != null;
+            _imageWatermarkPreviewActive = _imageWatermarkMode;
+            if (!_imageWatermarkMode) _movingImageWatermark = _resizingImageWatermark = false;
+            Cursor = _imageWatermarkMode ? Cursors.SizeAll : Cursors.Default;
+            Invalidate();
+        }
+
+        public void ClearImageWatermarkPreview()
+        {
+            _imageWatermarkPreview = null;
+            _imageWatermarkPreviewActive = false;
+            _imageWatermarkMode = false;
+            _movingImageWatermark = _resizingImageWatermark = false;
+            Invalidate();
+        }
+
+        private Rectangle ClampImageWatermarkBounds(Rectangle bounds)
+        {
+            if (Image == null) return Rectangle.Empty;
+            int width = Math.Max(1, Math.Min(Image.Width, bounds.Width));
+            int height = Math.Max(1, Math.Min(Image.Height, bounds.Height));
+            int x = Math.Max(0, Math.Min(Image.Width - width, bounds.X));
+            int y = Math.Max(0, Math.Min(Image.Height - height, bounds.Y));
+            return new Rectangle(x, y, width, height);
+        }
+
+        private void SetImageWatermarkBounds(Rectangle bounds)
+        {
+            _imageWatermarkBounds = ClampImageWatermarkBounds(bounds);
+            Invalidate();
+            if (ImageWatermarkBoundsChanged != null) ImageWatermarkBoundsChanged(_imageWatermarkBounds);
+        }
 
         public Point CanvasPointToImage(Point point)
         {
@@ -1421,9 +2079,22 @@ namespace LocalPhotoViewer
             Invalidate();
         }
 
+        public void SetWatermarkPreview(bool active, bool tiled, int angle, int spacing, WatermarkStyle style, int opacity)
+        {
+            _watermarkPreviewActive = active;
+            _watermarkPreviewTiled = tiled;
+            _watermarkPreviewAngle = angle;
+            _watermarkPreviewSpacing = spacing;
+            _watermarkPreviewStyle = style;
+            _watermarkPreviewOpacity = opacity;
+            Invalidate();
+        }
+
         public void ClearTextPreview()
         {
             _textPreviewActive = false;
+            _watermarkPreviewActive = false;
+            _watermarkPreviewTiled = false;
             _movingTextPreview = false;
             _resizingTextPreview = false;
             TextPreview = String.Empty;
@@ -1575,7 +2246,31 @@ namespace LocalPhotoViewer
             }
             e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
             e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            e.Graphics.DrawImage(Image, new RectangleF(_offset.X, _offset.Y, w, h));
+            Image display = PreviewImage ?? Image;
+            e.Graphics.DrawImage(display, new RectangleF(_offset.X, _offset.Y, w, h));
+            if (_imageWatermarkPreviewActive && _imageWatermarkPreview != null)
+            {
+                RectangleF watermarkBounds = ImageRectangleToCanvas(_imageWatermarkBounds);
+                using (ImageAttributes attributes = new ImageAttributes())
+                {
+                    ColorMatrix matrix = new ColorMatrix();
+                    matrix.Matrix33 = _imageWatermarkOpacity / 100f;
+                    attributes.SetColorMatrix(matrix);
+                    e.Graphics.DrawImage(_imageWatermarkPreview, Rectangle.Round(watermarkBounds), 0, 0, _imageWatermarkPreview.Width, _imageWatermarkPreview.Height, GraphicsUnit.Pixel, attributes);
+                }
+                if (_imageWatermarkMode)
+                {
+                    using (Pen frame = new Pen(Color.FromArgb(225, 95, 185, 255), 1.5f) { DashStyle = DashStyle.Dash })
+                    using (Brush handle = new SolidBrush(Color.White))
+                    using (Pen outline = new Pen(Color.FromArgb(25, 125, 220), 1f))
+                    {
+                        e.Graphics.DrawRectangle(frame, watermarkBounds.X, watermarkBounds.Y, watermarkBounds.Width, watermarkBounds.Height);
+                        RectangleF grip = new RectangleF(watermarkBounds.Right - 5, watermarkBounds.Bottom - 5, 10, 10);
+                        e.Graphics.FillRectangle(handle, grip);
+                        e.Graphics.DrawRectangle(outline, grip.X, grip.Y, grip.Width, grip.Height);
+                    }
+                }
+            }
             if (_dragging && ActiveTool == EditorTool.Brush) DrawBrushStrokePreview(e.Graphics);
             if (_dragging && ActiveTool == EditorTool.Mosaic) DrawMosaicStrokePreview(e.Graphics);
             if (_dragging && (ActiveTool == EditorTool.Arrow || ActiveTool == EditorTool.Rectangle)) DrawAnnotationPreview(e.Graphics);
@@ -1661,6 +2356,29 @@ namespace LocalPhotoViewer
             Focus();
             _mousePosition = e.Location;
             _hasMousePosition = true;
+            if (_imageWatermarkMode)
+            {
+                if (Image == null || e.Button != MouseButtons.Left || !ImageScreenBounds().Contains(e.Location)) return;
+                RectangleF frame = ImageRectangleToCanvas(_imageWatermarkBounds);
+                _resizingImageWatermark = Near(e.Location, frame.Right, frame.Bottom, 11f);
+                _movingImageWatermark = !_resizingImageWatermark;
+                _imageWatermarkDragStart = e.Location;
+                _imageWatermarkDragStartBounds = _imageWatermarkBounds;
+                if (_movingImageWatermark && !frame.Contains(e.Location))
+                {
+                    Point imagePoint = ImagePoint(e.Location);
+                    Rectangle moved = _imageWatermarkBounds;
+                    moved.X = imagePoint.X - moved.Width / 2;
+                    moved.Y = imagePoint.Y - moved.Height / 2;
+                    _imageWatermarkDragStartBounds = ClampImageWatermarkBounds(moved);
+                    _imageWatermarkBounds = _imageWatermarkDragStartBounds;
+                    _imageWatermarkDragStart = e.Location;
+                }
+                Capture = true;
+                Cursor = _resizingImageWatermark ? Cursors.SizeNWSE : Cursors.SizeAll;
+                Invalidate();
+                return;
+            }
             if (_textPreviewActive)
             {
                 if (Image == null || e.Button != MouseButtons.Left || !ClientRectangle.Contains(e.Location)) return;
@@ -1714,6 +2432,28 @@ namespace LocalPhotoViewer
             base.OnMouseMove(e);
             _mousePosition = e.Location;
             _hasMousePosition = true;
+            if (_movingImageWatermark || _resizingImageWatermark)
+            {
+                int dx = (int)Math.Round((e.X - _imageWatermarkDragStart.X) / Math.Max(0.01f, _scale));
+                int dy = (int)Math.Round((e.Y - _imageWatermarkDragStart.Y) / Math.Max(0.01f, _scale));
+                Rectangle moved = _imageWatermarkDragStartBounds;
+                if (_movingImageWatermark)
+                {
+                    moved.X += dx;
+                    moved.Y += dy;
+                }
+                else if (_imageWatermarkPreview != null)
+                {
+                    double aspect = (double)_imageWatermarkPreview.Width / Math.Max(1, _imageWatermarkPreview.Height);
+                    int requestedWidth = Math.Abs(dx) >= Math.Abs(dy * aspect) ? moved.Width + dx : (int)Math.Round(moved.Width + dy * aspect);
+                    int maxWidth = Math.Min(Image.Width - moved.X, (int)Math.Floor((Image.Height - moved.Y) * aspect));
+                    int minWidth = Math.Min(maxWidth, Math.Max(1, (int)Math.Ceiling(24f / Math.Max(0.01f, _scale))));
+                    moved.Width = Math.Max(minWidth, Math.Min(Math.Max(1, maxWidth), requestedWidth));
+                    moved.Height = Math.Max(1, (int)Math.Round(moved.Width / aspect));
+                }
+                SetImageWatermarkBounds(moved);
+                return;
+            }
             if (_movingTextPreview || _resizingTextPreview)
             {
                 int dx = (int)Math.Round((e.X - _textDragStart.X) / Math.Max(0.01f, _scale));
@@ -1731,6 +2471,12 @@ namespace LocalPhotoViewer
             }
             if (!_dragging)
             {
+                if (_imageWatermarkMode)
+                {
+                    RectangleF watermark = ImageRectangleToCanvas(_imageWatermarkBounds);
+                    Cursor = Near(e.Location, watermark.Right, watermark.Bottom, 11f) ? Cursors.SizeNWSE : Cursors.SizeAll;
+                    return;
+                }
                 if (_textPreviewActive)
                 {
                     CropHandle handle = HitTestTextPreviewHandle(e.Location);
@@ -1772,6 +2518,15 @@ namespace LocalPhotoViewer
             base.OnMouseUp(e);
             _mousePosition = e.Location;
             _hasMousePosition = true;
+            if ((_movingImageWatermark || _resizingImageWatermark) && e.Button == MouseButtons.Left)
+            {
+                _movingImageWatermark = _resizingImageWatermark = false;
+                Capture = false;
+                Cursor = Cursors.SizeAll;
+                if (ImageWatermarkBoundsChanged != null) ImageWatermarkBoundsChanged(_imageWatermarkBounds);
+                Invalidate();
+                return;
+            }
             if ((_movingTextPreview || _resizingTextPreview) && e.Button == MouseButtons.Left)
             {
                 _movingTextPreview = false;
@@ -1854,6 +2609,29 @@ namespace LocalPhotoViewer
         {
             Rectangle bounds = TextPreviewBoundsInImage;
             RectangleF screenBounds = ImageRectangleToCanvas(bounds);
+            if (_watermarkPreviewActive && !String.IsNullOrWhiteSpace(TextPreview))
+            {
+                GraphicsState state = graphics.Save();
+                using (Matrix transform = new Matrix(_scale, 0f, 0f, _scale, _offset.X, _offset.Y))
+                using (Font font = new Font(TextPreviewFontFamily, Math.Max(8, Math.Min(300, TextPreviewFontPixels)), TextPreviewStyle, GraphicsUnit.Pixel))
+                {
+                    graphics.Transform = transform;
+                    graphics.SetClip(new RectangleF(0, 0, Image.Width, Image.Height), CombineMode.Intersect);
+                    WatermarkRenderer.Draw(
+                        graphics,
+                        TextPreview,
+                        font,
+                        WatermarkRenderer.WithOpacity(TextPreviewColor, _watermarkPreviewOpacity),
+                        _watermarkPreviewStyle,
+                        TextPreviewShadow,
+                        bounds,
+                        _watermarkPreviewTiled,
+                        _watermarkPreviewAngle,
+                        _watermarkPreviewSpacing,
+                        Image.Size);
+                }
+                graphics.Restore(state);
+            }
             using (Brush tint = new SolidBrush(Color.FromArgb(14, 70, 160, 245)))
             using (Pen frame = new Pen(Color.FromArgb(230, 95, 185, 255), 1.5f) { DashStyle = DashStyle.Dash })
             using (Brush handleFill = new SolidBrush(Color.White))
@@ -1876,7 +2654,7 @@ namespace LocalPhotoViewer
                 }
             }
 
-            if (String.IsNullOrEmpty(TextPreview)) return;
+            if (String.IsNullOrEmpty(TextPreview) || _watermarkPreviewActive) return;
             float previewSize = Math.Max(6f, Math.Min(300f, TextPreviewFontPixels * _scale));
             using (Font font = new Font(TextPreviewFontFamily, previewSize, TextPreviewStyle, GraphicsUnit.Pixel))
             using (Brush brush = new SolidBrush(TextPreviewColor))

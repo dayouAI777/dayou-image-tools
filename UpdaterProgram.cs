@@ -35,7 +35,6 @@ namespace DayouImageToolsUpdater
     internal static class UpdaterBootstrapper
     {
         private const int WaitForUpdaterSeconds = 45;
-        private const int CloseRequestDelaySeconds = 3;
 
         public static void ReplaceInstalledUpdater()
         {
@@ -77,9 +76,7 @@ namespace DayouImageToolsUpdater
 
         private static bool WaitForInstalledUpdater(string expectedPath)
         {
-            DateTime started = DateTime.UtcNow;
-            DateTime deadline = started.AddSeconds(WaitForUpdaterSeconds);
-            bool closeRequested = false;
+            DateTime deadline = DateTime.UtcNow.AddSeconds(WaitForUpdaterSeconds);
             string expected = Path.GetFullPath(expectedPath);
             while (DateTime.UtcNow < deadline)
             {
@@ -93,12 +90,6 @@ namespace DayouImageToolsUpdater
                         string actual = Path.GetFullPath(process.MainModule.FileName);
                         if (!String.Equals(actual, expected, StringComparison.OrdinalIgnoreCase)) continue;
                         found = true;
-                        if (!closeRequested && DateTime.UtcNow - started >= TimeSpan.FromSeconds(CloseRequestDelaySeconds))
-                        {
-                            closeRequested = true;
-                            bool sent = process.CloseMainWindow();
-                            WriteLog(sent ? "已请求关闭旧升级器窗口。" : "旧升级器仍在运行，等待其安全退出。");
-                        }
                     }
                     catch (Exception ex)
                     {
@@ -399,6 +390,7 @@ namespace DayouImageToolsUpdater
         private readonly ListBox _fileList;
         private readonly Button _applyButton;
         private readonly Button _onlineButton;
+        private readonly Button _closeButton;
         private UpdatePackageInfo _package;
         private GitHubReleaseInfo _onlineRelease;
         private Version _installedVersion;
@@ -472,13 +464,14 @@ namespace DayouImageToolsUpdater
             listPanel.Controls.Add(_fileList);
 
             Panel bottom = new Panel { Dock = DockStyle.Bottom, Height = 62, Padding = new Padding(18, 8, 18, 12) };
-            Button close = new Button { Text = "关闭", Dock = DockStyle.Right, Width = 92, DialogResult = DialogResult.Cancel };
+            _closeButton = new Button { Text = "关闭", Dock = DockStyle.Right, Width = 112 };
+            _closeButton.Click += delegate { CloseAfterApply(); };
             _applyButton = new Button { Text = "开始升级", Dock = DockStyle.Right, Width = 120, Enabled = false, BackColor = Color.FromArgb(223, 91, 78), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             _applyButton.FlatAppearance.BorderSize = 0;
             _applyButton.Click += delegate { BeginApply(); };
             _onlineButton = new Button { Text = "检查在线更新", Dock = DockStyle.Left, Width = 138 };
             _onlineButton.Click += delegate { OnOnlineButtonClick(); };
-            bottom.Controls.Add(close);
+            bottom.Controls.Add(_closeButton);
             bottom.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 10 });
             bottom.Controls.Add(_applyButton);
             bottom.Controls.Add(_onlineButton);
@@ -490,7 +483,7 @@ namespace DayouImageToolsUpdater
             Controls.Add(intro);
             Controls.Add(title);
             AcceptButton = _applyButton;
-            CancelButton = close;
+            CancelButton = _closeButton;
 
             DragEnter += OnPackageDragEnter;
             DragDrop += OnPackageDragDrop;
@@ -715,6 +708,7 @@ namespace DayouImageToolsUpdater
             string packagePath = _package.Path;
             _working = true;
             _applyButton.Enabled = false;
+            _closeButton.Enabled = false;
             _status.ForeColor = Color.FromArgb(45, 98, 111);
             _status.Text = "正在校验、备份并部署，请稍候…";
             Task.Run(delegate
@@ -732,12 +726,18 @@ namespace DayouImageToolsUpdater
                         {
                             _installedVersion = _package.Version;
                             _applyButton.Enabled = false;
+                            _closeButton.Enabled = true;
+                            _closeButton.Text = "关闭并启动";
+                            _restartAfterClose = true;
                             _status.Text = outcome;
                             MessageBox.Show(this, outcome, "升级完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
                         }
                         else
                         {
                             _applyButton.Enabled = _package != null;
+                            _closeButton.Enabled = true;
+                            _closeButton.Text = "关闭";
+                            _restartAfterClose = false;
                             _status.Text = "升级未完成：" + failure.Message;
                             _status.ForeColor = Color.FromArgb(174, 61, 49);
                             MessageBox.Show(this, failure.Message, "升级失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -843,17 +843,31 @@ namespace DayouImageToolsUpdater
 
             AppendDiagnosticLog("更新到版本 " + package.Version + " 已完成。");
             string restartMessage = "更新到版本 " + package.Version + " 已完成。旧文件备份在：\n" + backupRoot;
-            try
-            {
-                Process.Start(new ProcessStartInfo(_mainPath) { WorkingDirectory = _installDirectory, UseShellExecute = true });
-                log("已重新启动大有图片工具。");
-            }
-            catch (Exception ex)
-            {
-                AppendDiagnosticLog("自动重新启动主程序失败：" + ex);
-                restartMessage += "\n\n自动启动失败，请从桌面快捷方式启动程序。\n" + ex.Message;
-            }
+            AppendDiagnosticLog("更新完成，等待用户关闭更新器后启动主程序。");
+            restartMessage += "\n\n点击“关闭并启动”后会退出更新器并启动新版本。";
             return restartMessage;
+        }
+
+        private bool _restartAfterClose;
+
+        private void CloseAfterApply()
+        {
+            if (_working) return;
+            if (_restartAfterClose)
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo(_mainPath) { WorkingDirectory = _installDirectory, UseShellExecute = true });
+                    _restartAfterClose = false;
+                }
+                catch (Exception ex)
+                {
+                    AppendDiagnosticLog("更新后启动主程序失败：" + ex);
+                    MessageBox.Show(this, "更新已经完成，但启动新版本失败。请从桌面或开始菜单启动程序。\n\n" + ex.Message, "启动失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+            }
+            Close();
         }
 
         private void CloseRunningMain(Action<string> log)
