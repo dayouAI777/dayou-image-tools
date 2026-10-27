@@ -21,9 +21,177 @@ namespace DayouImageToolsUpdater
         [STAThread]
         private static void Main(string[] args)
         {
+            if (args != null && args.Length > 0 && String.Equals(args[0], "--replace-installed-updater", StringComparison.Ordinal))
+            {
+                UpdaterBootstrapper.ReplaceInstalledUpdater();
+                return;
+            }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new UpdaterForm(args));
+        }
+    }
+
+    internal static class UpdaterBootstrapper
+    {
+        private const int WaitForUpdaterSeconds = 45;
+        private const int CloseRequestDelaySeconds = 3;
+
+        public static void ReplaceInstalledUpdater()
+        {
+            string installDirectory = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string currentPath = Path.Combine(installDirectory, "DayouImageToolsUpdater.exe");
+            string nextPath = Path.Combine(installDirectory, "DayouImageToolsUpdaterNext.exe");
+            string mainPath = Path.Combine(installDirectory, "DayouImageTools.exe");
+            try
+            {
+                if (!File.Exists(currentPath) || !File.Exists(nextPath) || !File.Exists(mainPath)) return;
+                Version currentVersion = GetVersion(currentPath);
+                Version nextVersion = GetVersion(nextPath);
+                Version mainVersion = GetVersion(mainPath);
+                if (nextVersion <= currentVersion || nextVersion > mainVersion)
+                {
+                    WriteLog("跳过升级器替换：候补版本=" + nextVersion + "，当前升级器=" + currentVersion + "，主程序=" + mainVersion + "。");
+                    return;
+                }
+
+                using (Mutex mutex = new Mutex(false, "Local\\DayouImageToolsUpdaterBootstrap_" + GetInstallHash(installDirectory)))
+                {
+                    bool acquired = false;
+                    try { acquired = mutex.WaitOne(0); }
+                    catch (AbandonedMutexException) { acquired = true; }
+                    if (!acquired) return;
+                    try
+                    {
+                        if (!WaitForInstalledUpdater(currentPath)) return;
+                        ReplaceWithRetry(nextPath, currentPath, currentVersion);
+                    }
+                    finally { mutex.ReleaseMutex(); }
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteLog("升级器替换失败：" + ex);
+            }
+        }
+
+        private static bool WaitForInstalledUpdater(string expectedPath)
+        {
+            DateTime started = DateTime.UtcNow;
+            DateTime deadline = started.AddSeconds(WaitForUpdaterSeconds);
+            bool closeRequested = false;
+            string expected = Path.GetFullPath(expectedPath);
+            while (DateTime.UtcNow < deadline)
+            {
+                bool found = false;
+                bool inspectionFailed = false;
+                foreach (Process process in Process.GetProcessesByName("DayouImageToolsUpdater"))
+                {
+                    try
+                    {
+                        if (process.Id == Process.GetCurrentProcess().Id) continue;
+                        string actual = Path.GetFullPath(process.MainModule.FileName);
+                        if (!String.Equals(actual, expected, StringComparison.OrdinalIgnoreCase)) continue;
+                        found = true;
+                        if (!closeRequested && DateTime.UtcNow - started >= TimeSpan.FromSeconds(CloseRequestDelaySeconds))
+                        {
+                            closeRequested = true;
+                            bool sent = process.CloseMainWindow();
+                            WriteLog(sent ? "已请求关闭旧升级器窗口。" : "旧升级器仍在运行，等待其安全退出。");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        bool exited = false;
+                        try { exited = process.HasExited; } catch { }
+                        if (!exited)
+                        {
+                            inspectionFailed = true;
+                            WriteLog("无法确认旧升级器进程状态：" + ex.Message);
+                        }
+                    }
+                    finally { process.Dispose(); }
+                }
+
+                if (!found && !inspectionFailed) return true;
+                Thread.Sleep(250);
+            }
+            WriteLog("等待旧升级器退出超时，保留当前升级器；重新启动主程序后会再次尝试。");
+            return false;
+        }
+
+        private static void ReplaceWithRetry(string source, string destination, Version oldVersion)
+        {
+            Exception lastError = null;
+            string tempBackup = null;
+            for (int attempt = 1; attempt <= 8; attempt++)
+            {
+                tempBackup = destination + ".bootstrap-" + Guid.NewGuid().ToString("N") + ".bak";
+                try
+                {
+                    if (File.Exists(destination)) File.Replace(source, destination, tempBackup);
+                    else File.Move(source, destination);
+                    lastError = null;
+                    break;
+                }
+                catch (IOException ex)
+                {
+                    lastError = ex;
+                    try { if (File.Exists(tempBackup)) File.Delete(tempBackup); } catch { }
+                    Thread.Sleep(300);
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    lastError = ex;
+                    try { if (File.Exists(tempBackup)) File.Delete(tempBackup); } catch { }
+                    Thread.Sleep(300);
+                }
+            }
+            if (lastError != null) throw new IOException("替换旧升级器失败。", lastError);
+
+            if (!String.IsNullOrWhiteSpace(tempBackup) && File.Exists(tempBackup))
+            {
+                try
+                {
+                    string backupDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "大有图片工具", "UpdateBackups");
+                    Directory.CreateDirectory(backupDirectory);
+                    string backupPath = Path.Combine(backupDirectory, "DayouImageToolsUpdater-" + oldVersion + "-" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".exe");
+                    File.Copy(tempBackup, backupPath, false);
+                    File.Delete(tempBackup);
+                    WriteLog("旧升级器已备份到：" + backupPath);
+                }
+                catch (Exception ex)
+                {
+                    WriteLog("已替换升级器，但移动临时备份失败，备份仍在：" + tempBackup + "；" + ex.Message);
+                }
+            }
+            WriteLog("升级器已从版本 " + oldVersion + " 替换为 " + GetVersion(destination) + "。");
+        }
+
+        private static Version GetVersion(string path)
+        {
+            Version version;
+            string value = FileVersionInfo.GetVersionInfo(path).FileVersion;
+            if (!Version.TryParse(value, out version))
+                throw new InvalidDataException("文件版本信息无效：" + path);
+            return version;
+        }
+
+        private static string GetInstallHash(string path)
+        {
+            using (SHA256 sha = SHA256.Create())
+                return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(path.ToUpperInvariant()))).Replace("-", String.Empty).Substring(0, 24);
+        }
+
+        private static void WriteLog(string message)
+        {
+            try
+            {
+                string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "大有图片工具", "Logs");
+                Directory.CreateDirectory(directory);
+                File.AppendAllText(Path.Combine(directory, "updater-bootstrap.log"), DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " " + message + Environment.NewLine, Encoding.UTF8);
+            }
+            catch { }
         }
     }
 

@@ -33,6 +33,8 @@ run.cmd "D:\Pictures"
 
 “编辑”会打开单独的编辑窗口，提供撤销/重做、框选裁剪、左右旋转、翻转、纠偏、改尺寸、扩展画布、画笔、文字、箭头、矩形标注、马赛克、文字/图片水印、边框、滤镜、亮度/对比度/饱和度调整、锐化和柔化。默认另存为新文件，避免覆盖原图。
 
+1.3.5 的文字水印提供右下角可移动、可缩放的实时输入框，包含柔影字、描边字、半透明底牌和印章边框样式，可调透明度；也可铺满全图并调整方向和间距。
+
 裁剪页现在提供自由、原图、1:1、4:3、3:2、16:9、9:16、3:4、2:3、5:4、4:5 等比例；也可以输入自定义输出宽高（像素），拖选区域会跟随该宽高比例，应用后输出指定尺寸。
 
 ## 批处理
@@ -41,9 +43,9 @@ run.cmd "D:\Pictures"
 
 ## 升级
 
-1.3.4 加强了主程序退出检测、更新文件占用重试和本地诊断日志。由于升级器自身通过完整安装程序更新，1.3.3 及更早版本请先运行 1.3.4 完整安装程序一次；之后日常版本可从更新中心在线更新。
+1.3.5 增强了文字水印编辑，并固定使用 TLS 1.2 连接 GitHub，修复部分 Windows 环境中在线检查和下载失败的问题。更新包还携带新版升级器与替换助手：1.3.4 用户可从更新中心安装，主程序首次启动时会等待旧升级器退出并自动替换；1.3.3 及更早版本需先运行一次完整安装程序。若 1.3.4 的在线检查仍失败，可用浏览器下载 `.dayouupdate` 后在更新中心选择；后续在线更新会使用 TLS 1.2。
 
-开始菜单提供“升级大有图片工具”。从 1.3.0 起，升级程序可通过公开 GitHub Releases 检查新版、显示更新说明、下载 `.dayouupdate` 并校验 GitHub 提供的 SHA-256 摘要；确认后再由本地部署器校验包内文件清单、备份旧文件并更新，失败时自动回滚。1.3.1 修正了独立升级器的 .NET Framework TLS 目标配置并增加网络诊断；1.3.2 修正了 GitHub Release 附件列表的解析兼容性；1.3.4 加强了升级器的进程退出检测、文件占用重试和本地诊断日志。也可以继续选择本地 `.dayouupdate` 或 ZIP 包。初次获得在线更新功能，请先安装 Releases 中最新版本的完整安装程序；此后日常版本可从更新中心在线更新。升级器自身仍通过完整安装程序升级。更新包制作脚本和规范见 `tools\make_update_package.py` 与 `UPDATE_PACKAGE_FORMAT.md`。
+开始菜单提供“升级大有图片工具”。从 1.3.0 起，升级程序可通过公开 GitHub Releases 检查新版、显示更新说明、下载 `.dayouupdate` 并校验 GitHub 提供的 SHA-256 摘要；确认后再由本地部署器校验包内文件清单、备份旧文件并更新，失败时自动回滚。1.3.1 修正了独立升级器的 .NET Framework TLS 目标配置并增加网络诊断；1.3.2 修正了 GitHub Release 附件列表的解析兼容性；1.3.4 加强了升级器的进程退出检测、文件占用重试和本地诊断日志；1.3.5 起更新包可携带并自动替换新版升级器。也可以继续选择本地 `.dayouupdate` 或 ZIP 包。1.3.4 可直接更新到 1.3.5；1.3.3 及更早版本需要完整安装程序更新一次。更新包制作脚本和规范见 `tools\\make_update_package.py` 与 `UPDATE_PACKAGE_FORMAT.md`。
 
 ### 发布在线更新
 
@@ -59,4 +61,4 @@ run.cmd "D:\Pictures"
 
 ## 构建
 
-双击 `build.cmd` 生成 x64 主程序和升级程序。如果 `third_party\Magick.NET` 中缺少运行库，构建脚本会从 NuGet 下载固定版本 15.0.0 并恢复所需 DLL。安装包由 Inno Setup 使用 `setup.iss` 生成。更新包可在构建后运行 `python tools\make_update_package.py --version 1.3.4`，输出到 `bin\大有图片工具_v1.3.4.dayouupdate`。构建使用 Windows 自带的 .NET Framework C# 编译器、WinForms、`System.Drawing` 和第三方 Magick.NET 解码库。第三方许可文本随安装包放在 `licenses` 文件夹中。
+双击 `build.cmd` 生成 x64 主程序和升级程序。如果 `third_party\Magick.NET` 中缺少运行库，构建脚本会从 NuGet 下载固定版本 15.0.0 并恢复所需 DLL。安装包由 Inno Setup 使用 `setup.iss` 生成。更新包可在构建后运行 `python tools\make_update_package.py --version 1.3.5`，输出到 `bin\大有图片工具_v1.3.5.dayouupdate`。构建使用 Windows 自带的 .NET Framework C# 编译器、WinForms、`System.Drawing` 和第三方 Magick.NET 解码库。第三方许可文本随安装包放在 `licenses` 文件夹中。

@@ -32,9 +32,45 @@ namespace LocalPhotoViewer
         [STAThread]
         private static void Main(string[] args)
         {
+            StartUpdaterBootstrapIfNeeded();
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new ViewerForm(args));
+        }
+
+        private static void StartUpdaterBootstrapIfNeeded()
+        {
+            try
+            {
+                string directory = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
+                string installedUpdater = Path.Combine(directory, "DayouImageToolsUpdater.exe");
+                string nextUpdater = Path.Combine(directory, "DayouImageToolsUpdaterNext.exe");
+                string bootstrap = Path.Combine(directory, "DayouImageToolsUpdaterBootstrap.exe");
+                string main = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+                if (!File.Exists(installedUpdater) || !File.Exists(nextUpdater) || !File.Exists(bootstrap)) return;
+
+                Version current = ReadVersion(installedUpdater);
+                Version candidate = ReadVersion(nextUpdater);
+                Version helper = ReadVersion(bootstrap);
+                Version mainVersion = ReadVersion(main);
+                if (candidate <= current || helper < candidate || mainVersion < candidate) return;
+
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(bootstrap, "--replace-installed-updater")
+                {
+                    WorkingDirectory = directory,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
+                });
+            }
+            catch { }
+        }
+
+        private static Version ReadVersion(string path)
+        {
+            Version version;
+            string value = System.Diagnostics.FileVersionInfo.GetVersionInfo(path).FileVersion;
+            return Version.TryParse(value, out version) ? version : new Version(0, 0, 0, 0);
         }
     }
 

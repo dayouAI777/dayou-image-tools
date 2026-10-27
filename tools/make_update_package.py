@@ -10,13 +10,15 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 PAYLOAD_FILES = (
-    "DayouImageTools.exe",
-    "Magick.NET-Q8-x64.dll",
-    "Magick.NET.Core.dll",
-    "Magick.Native-Q8-x64.dll",
-    "DayouImageTools.ico",
+    ("DayouImageTools.exe", "DayouImageTools.exe"),
+    ("Magick.NET-Q8-x64.dll", "Magick.NET-Q8-x64.dll"),
+    ("Magick.NET.Core.dll", "Magick.NET.Core.dll"),
+    ("Magick.Native-Q8-x64.dll", "Magick.Native-Q8-x64.dll"),
+    ("DayouImageTools.ico", "DayouImageTools.ico"),
+    ("DayouImageToolsUpdater.exe", "DayouImageToolsUpdaterNext.exe"),
+    ("DayouImageToolsUpdater.exe", "DayouImageToolsUpdaterBootstrap.exe"),
 )
-# Keep this aligned with the oldest updater that can safely apply the package.
+# 1.3.4 can deploy the side-by-side helper files without replacing its own executable.
 MINIMUM_UPDATER_VERSION = "1.3.4"
 
 
@@ -45,16 +47,17 @@ def main() -> int:
         minimumUpdaterVersion=MINIMUM_UPDATER_VERSION,
     )
     files = []
-    for name in PAYLOAD_FILES:
+    for name, target in PAYLOAD_FILES:
         source = ROOT / "bin" / name
         if not source.is_file():
             raise FileNotFoundError("Missing built release file: " + str(source))
-        files.append((source, "payload/" + name))
+        archive_name = "payload/" + target
+        files.append((source, archive_name))
         ET.SubElement(
             manifest,
             "file",
-            source="payload/" + name,
-            target=name,
+            source=archive_name,
+            target=target,
             sha256=sha256(source),
         )
 
