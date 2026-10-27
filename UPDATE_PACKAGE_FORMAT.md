@@ -5,7 +5,7 @@
 ## 文件布局
 
 ```text
-dayou-image-tools-1.3.6.dayouupdate
+dayou-image-tools-1.3.7.dayouupdate
 ├── dayou-update.xml
 └── payload/
     ├── DayouImageTools.exe
@@ -23,7 +23,7 @@ dayou-image-tools-1.3.6.dayouupdate
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
-<dayouUpdate product="DayouImageTools" version="1.3.6" minimumUpdaterVersion="1.3.4">
+<dayouUpdate product="DayouImageTools" version="1.3.7" minimumUpdaterVersion="1.3.4">
   <file source="payload/DayouImageTools.exe" target="DayouImageTools.exe" sha256="替换为64位十六进制SHA-256" />
   <file source="payload/Magick.NET-Q8-x64.dll" target="Magick.NET-Q8-x64.dll" sha256="替换为64位十六进制SHA-256" />
   <file source="payload/Magick.NET.Core.dll" target="Magick.NET.Core.dll" sha256="替换为64位十六进制SHA-256" />
@@ -43,4 +43,4 @@ dayou-image-tools-1.3.6.dayouupdate
 - 更新包不能直接写入正在运行的 `DayouImageToolsUpdater.exe`。1.3.5 起通过候补文件和独立助手完成替换；1.3.4 可安装该候补文件，因此无需完整安装程序。1.3.3 及更早版本需要先运行一次完整安装程序。
 - 在线更新从 `dayouAI777/dayou-image-tools` 的最新正式 GitHub Release 检查；Release 标签必须是 `v1.2.3` 这种版本号，并且要附带 `.dayouupdate` 资产。升级器会验证下载地址为 GitHub HTTPS 域名、资产大小、GitHub 提供的 SHA-256 摘要，以及包内逐文件 SHA-256。
 
-下次制作更新时，先构建程序，再运行 `python tools/make_update_package.py --version 1.3.6` 自动复制当前程序文件和升级器候补文件、生成含 SHA-256 的清单并打成 `.dayouupdate`。将该包上传到同版本的 GitHub Release。用户打开“升级大有图片工具”，检查、下载并确认后即可部署；首次启动新版主程序时会自动替换已安装的升级器。
+下次制作更新时，先构建程序，再运行 `python tools/make_update_package.py --version 1.3.7` 自动复制当前程序文件和升级器候补文件、生成含 SHA-256 的清单并打成 `.dayouupdate`。将该包上传到同版本的 GitHub Release。用户打开“升级大有图片工具”，检查、下载并确认后即可部署；首次启动新版主程序时会自动替换已安装的升级器。

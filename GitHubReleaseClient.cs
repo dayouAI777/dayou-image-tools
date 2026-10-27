@@ -6,6 +6,7 @@ using System.IO;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Web.Script.Serialization;
 
 namespace DayouImageToolsUpdater
@@ -28,45 +29,63 @@ namespace DayouImageToolsUpdater
         private const string RepositoryOwner = "dayouAI777";
         private const string RepositoryName = "dayou-image-tools";
         private const long MaximumAssetSize = 2L * 1024L * 1024L * 1024L;
+        private const int MaximumNetworkAttempts = 3;
 
         static GitHubReleaseClient()
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
         }
 
-        public static GitHubReleaseInfo GetLatestRelease()
+        public static GitHubReleaseInfo GetLatestRelease(Action<int> retrying)
         {
             string apiUrl = "https://api.github.com/repos/" + Uri.EscapeDataString(RepositoryOwner) + "/" + Uri.EscapeDataString(RepositoryName) + "/releases/latest";
-            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(apiUrl);
-            request.Method = "GET";
-            request.Accept = "application/vnd.github+json";
-            request.UserAgent = "DayouImageToolsUpdater/1.3.5";
-            request.Headers["X-GitHub-Api-Version"] = "2022-11-28";
-            request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-            request.Timeout = 30000;
-            request.ReadWriteTimeout = 30000;
-
-            string json;
-            try
+            string json = null;
+            for (int attempt = 1; attempt <= MaximumNetworkAttempts; attempt++)
             {
-                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
-                using (Stream stream = response.GetResponseStream())
-                using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
-                    json = reader.ReadToEnd();
-            }
-            catch (WebException ex)
-            {
-                HttpWebResponse response = ex.Response as HttpWebResponse;
-                if (response != null && response.StatusCode == HttpStatusCode.NotFound)
+                try
                 {
-                    response.Dispose();
-                    return null;
+                    HttpWebRequest request = (HttpWebRequest)WebRequest.Create(apiUrl);
+                    request.Method = "GET";
+                    request.Accept = "application/vnd.github+json";
+                    request.UserAgent = "DayouImageToolsUpdater/1.3.7";
+                    request.Headers["X-GitHub-Api-Version"] = "2022-11-28";
+                    request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+                    request.Timeout = 45000;
+                    request.ReadWriteTimeout = 60000;
+
+                    using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                    using (Stream stream = response.GetResponseStream())
+                    using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
+                        json = reader.ReadToEnd();
+                    break;
                 }
-                string detail = ReadErrorResponse(response);
-                string diagnostic = ex.Status + "：" + ex.Message;
-                if (ex.InnerException != null && !String.IsNullOrWhiteSpace(ex.InnerException.Message))
-                    diagnostic += "（" + ex.InnerException.Message + "）";
-                throw new IOException("无法读取 GitHub Releases。网络诊断：" + diagnostic + (String.IsNullOrWhiteSpace(detail) ? "" : "\n" + detail), ex);
+                catch (WebException ex)
+                {
+                    HttpWebResponse response = ex.Response as HttpWebResponse;
+                    if (response != null && response.StatusCode == HttpStatusCode.NotFound)
+                    {
+                        response.Dispose();
+                        return null;
+                    }
+                    if (!IsTransientNetworkFailure(ex) || attempt == MaximumNetworkAttempts)
+                    {
+                        string detail = ReadErrorResponse(response);
+                        string diagnostic = ex.Status + "：" + ex.Message;
+                        if (ex.InnerException != null && !String.IsNullOrWhiteSpace(ex.InnerException.Message))
+                            diagnostic += "（" + ex.InnerException.Message + "）";
+                        throw new IOException("无法读取 GitHub Releases。网络诊断：" + diagnostic + (String.IsNullOrWhiteSpace(detail) ? "" : "\n" + detail), ex);
+                    }
+                    if (response != null) response.Dispose();
+                    NotifyRetry(retrying, attempt + 1);
+                    Thread.Sleep(RetryDelay(attempt));
+                }
+                catch (IOException ex)
+                {
+                    if (attempt == MaximumNetworkAttempts)
+                        throw new IOException("连接 GitHub 检查更新失败，已自动重试 " + MaximumNetworkAttempts + " 次。网络诊断：" + ex.Message, ex);
+                    NotifyRetry(retrying, attempt + 1);
+                    Thread.Sleep(RetryDelay(attempt));
+                }
             }
 
             JavaScriptSerializer serializer = new JavaScriptSerializer { MaxJsonLength = 4 * 1024 * 1024 };
@@ -121,7 +140,7 @@ namespace DayouImageToolsUpdater
             };
         }
 
-        public static string DownloadAsset(GitHubReleaseInfo release, Action<long, long> progress)
+        public static string DownloadAsset(GitHubReleaseInfo release, Action<long, long> progress, Action<int> retrying)
         {
             if (release == null)
                 throw new ArgumentNullException("release");
@@ -137,66 +156,119 @@ namespace DayouImageToolsUpdater
             string destination = Path.Combine(downloadDirectory, "大有图片工具_" + release.Version + ".dayouupdate");
             string partial = destination + ".download";
             if (File.Exists(partial)) File.Delete(partial);
-
-            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(uri);
-            request.Method = "GET";
-            request.UserAgent = "DayouImageToolsUpdater/1.3.5";
-            request.Accept = "application/octet-stream";
-            request.Timeout = 30000;
-            request.ReadWriteTimeout = 60000;
-
-            try
+            for (int attempt = 1; attempt <= MaximumNetworkAttempts; attempt++)
             {
-                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                try
                 {
-                    if (response.ResponseUri == null || response.ResponseUri.Scheme != Uri.UriSchemeHttps || !IsGitHubHost(response.ResponseUri.Host))
-                        throw new InvalidDataException("GitHub 更新包重定向到了不受信任的主机。");
-                    long total = response.ContentLength > 0 ? response.ContentLength : release.AssetSize;
-                    if (response.ContentLength > MaximumAssetSize || (response.ContentLength > 0 && response.ContentLength != release.AssetSize))
-                        throw new InvalidDataException("下载包大小与 GitHub Release 清单不一致。");
+                    HttpWebRequest request = (HttpWebRequest)WebRequest.Create(uri);
+                    request.Method = "GET";
+                    request.UserAgent = "DayouImageToolsUpdater/1.3.7";
+                    request.Accept = "application/octet-stream";
+                    request.Timeout = 60000;
+                    request.ReadWriteTimeout = 90000;
 
-                    long received = 0;
-                    byte[] buffer = new byte[128 * 1024];
-                    using (Stream input = response.GetResponseStream())
-                    using (FileStream output = new FileStream(partial, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
                     {
-                        int read;
-                        while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+                        if (response.ResponseUri == null || response.ResponseUri.Scheme != Uri.UriSchemeHttps || !IsGitHubHost(response.ResponseUri.Host))
+                            throw new InvalidDataException("GitHub 更新包重定向到了不受信任的主机。");
+                        long total = response.ContentLength > 0 ? response.ContentLength : release.AssetSize;
+                        if (response.ContentLength > MaximumAssetSize || (response.ContentLength > 0 && response.ContentLength != release.AssetSize))
+                            throw new InvalidDataException("下载包大小与 GitHub Release 清单不一致。");
+
+                        long received = 0;
+                        byte[] buffer = new byte[128 * 1024];
+                        using (Stream input = response.GetResponseStream())
+                        using (FileStream output = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None))
                         {
-                            received += read;
-                            if (received > MaximumAssetSize || received > release.AssetSize)
-                                throw new InvalidDataException("下载包超过 GitHub Release 清单声明的大小。");
-                            output.Write(buffer, 0, read);
-                            if (progress != null)
-                                progress(received, total);
+                            int read;
+                            while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+                            {
+                                received += read;
+                                if (received > MaximumAssetSize || received > release.AssetSize)
+                                    throw new InvalidDataException("下载包超过 GitHub Release 清单声明的大小。");
+                                output.Write(buffer, 0, read);
+                                if (progress != null)
+                                    progress(received, total);
+                            }
+                            output.Flush();
                         }
-                        output.Flush();
+
+                        if (received != release.AssetSize)
+                            throw new IOException("下载中断：实际大小与 GitHub Release 清单不一致，正在自动重试。");
                     }
 
-                    if (received != release.AssetSize)
-                        throw new InvalidDataException("下载不完整：实际大小与 GitHub Release 清单不一致。");
-                }
+                    if (!String.IsNullOrWhiteSpace(release.AssetDigest))
+                    {
+                        string digest = release.AssetDigest.Trim();
+                        const string prefix = "sha256:";
+                        if (!digest.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || digest.Length != prefix.Length + 64)
+                            throw new InvalidDataException("GitHub 提供的更新包摘要格式无效。");
+                        string actual = ComputeSha256(partial);
+                        if (!String.Equals(actual, digest.Substring(prefix.Length), StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidDataException("更新包 SHA-256 与 GitHub Release 摘要不一致。");
+                    }
 
-                if (!String.IsNullOrWhiteSpace(release.AssetDigest))
+                    if (File.Exists(destination)) File.Delete(destination);
+                    File.Move(partial, destination);
+                    return destination;
+                }
+                catch (Exception ex)
                 {
-                    string digest = release.AssetDigest.Trim();
-                    const string prefix = "sha256:";
-                    if (!digest.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || digest.Length != prefix.Length + 64)
-                        throw new InvalidDataException("GitHub 提供的更新包摘要格式无效。");
-                    string actual = ComputeSha256(partial);
-                    if (!String.Equals(actual, digest.Substring(prefix.Length), StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidDataException("更新包 SHA-256 与 GitHub Release 摘要不一致。");
+                    bool retryable = IsTransientDownloadFailure(ex);
+                    if (!retryable || attempt == MaximumNetworkAttempts)
+                    {
+                        try { if (File.Exists(partial)) File.Delete(partial); } catch { }
+                        if (retryable)
+                            throw new IOException("更新包下载在自动重试 " + MaximumNetworkAttempts + " 次后仍失败。网络诊断：" + ex.Message, ex);
+                        throw;
+                    }
+                    try { if (File.Exists(partial)) File.Delete(partial); } catch { }
+                    NotifyRetry(retrying, attempt + 1);
+                    Thread.Sleep(RetryDelay(attempt));
                 }
+            }
+            throw new IOException("更新包下载失败。");
+        }
 
-                if (File.Exists(destination)) File.Delete(destination);
-                File.Move(partial, destination);
-                return destination;
-            }
-            catch
+        private static bool IsTransientDownloadFailure(Exception error)
+        {
+            if (error is InvalidDataException)
+                return false;
+            WebException webError = error as WebException;
+            if (webError != null)
+                return IsTransientNetworkFailure(webError);
+            return error is IOException;
+        }
+
+        private static bool IsTransientNetworkFailure(WebException error)
+        {
+            switch (error.Status)
             {
-                try { if (File.Exists(partial)) File.Delete(partial); } catch { }
-                throw;
+                case WebExceptionStatus.Timeout:
+                case WebExceptionStatus.ConnectFailure:
+                case WebExceptionStatus.NameResolutionFailure:
+                case WebExceptionStatus.ProxyNameResolutionFailure:
+                case WebExceptionStatus.ReceiveFailure:
+                case WebExceptionStatus.SendFailure:
+                case WebExceptionStatus.ConnectionClosed:
+                case WebExceptionStatus.KeepAliveFailure:
+                case WebExceptionStatus.PipelineFailure:
+                    return true;
             }
+
+            HttpWebResponse response = error.Response as HttpWebResponse;
+            return response != null && ((int)response.StatusCode == 408 || (int)response.StatusCode == 429 || (int)response.StatusCode >= 500);
+        }
+
+        private static int RetryDelay(int failedAttempt)
+        {
+            return failedAttempt * 1200;
+        }
+
+        private static void NotifyRetry(Action<int> retrying, int nextAttempt)
+        {
+            if (retrying != null)
+                retrying(nextAttempt);
         }
 
         private static Version ParseTagVersion(string tag)

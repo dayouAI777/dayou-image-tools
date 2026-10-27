@@ -74,6 +74,7 @@ namespace LocalPhotoViewer
         private Button _applyBorderButton;
         private Button _applyColorButton;
         private Button _applyFilterButton;
+        private Button _cancelFilterButton;
         private ComboBox _filterChoice;
         private NumericUpDown _imageWatermarkOpacity;
         private NumericUpDown _borderWidth;
@@ -376,15 +377,17 @@ namespace LocalPhotoViewer
             _applyColorButton.Click += delegate { AdjustColors(_brightnessTrack.Value, _contrastTrack.Value, _saturationTrack.Value); };
             _colorPage.Controls.Add(_applyColorButton);
             _filterChoice = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(14, 48), Width = 230 };
-            _filterChoice.Items.AddRange(new object[] { "黑白", "暖色", "冷色", "复古", "鲜艳", "低饱和" });
+            _filterChoice.Items.AddRange(new object[] { "请选择滤镜", "黑白", "暖色", "冷色", "复古", "鲜艳", "低饱和" });
             _filterChoice.SelectedIndex = 0;
             _filterChoice.SelectedIndexChanged += delegate { UpdateFilterPreview(); };
             _colorPage.Controls.Add(_filterChoice);
             _applyFilterButton = CreateActionButton("应用滤镜", 14, 104, 230, 38, true);
             _applyFilterButton.Click += ApplySelectedFilter;
             _colorPage.Controls.Add(_applyFilterButton);
-            _filterChoice.Visible = false;
-            _applyFilterButton.Visible = false;
+            _cancelFilterButton = CreateActionButton("取消滤镜", 14, 150, 230, 38, false);
+            _cancelFilterButton.Click += CancelFilterOptions;
+            _colorPage.Controls.Add(_cancelFilterButton);
+            _filterChoice.Visible = _applyFilterButton.Visible = _cancelFilterButton.Visible = false;
             _sideTabs.TabPages.Add(_colorPage);
 
             _infoPage = new TabPage("信息");
@@ -682,7 +685,7 @@ namespace LocalPhotoViewer
             _contrastLabel.Visible = _contrastTrack.Visible = true;
             _saturationLabel.Visible = _saturationTrack.Visible = true;
             _applyColorButton.Visible = true;
-            _filterChoice.Visible = _applyFilterButton.Visible = false;
+            _filterChoice.Visible = _applyFilterButton.Visible = _cancelFilterButton.Visible = false;
             ShowContext(_colorPage, "COLOR / TONE", "调色", "微调明暗、对比与饱和度");
         }
 
@@ -697,14 +700,24 @@ namespace LocalPhotoViewer
             _contrastLabel.Visible = _contrastTrack.Visible = false;
             _saturationLabel.Visible = _saturationTrack.Visible = false;
             _applyColorButton.Visible = false;
-            _filterChoice.Visible = _applyFilterButton.Visible = true;
+            ClearFilterPreview();
+            if (_filterChoice.SelectedIndex != 0) _filterChoice.SelectedIndex = 0;
+            _filterChoice.Visible = _applyFilterButton.Visible = _cancelFilterButton.Visible = true;
             ShowContext(_colorPage, "PRINT / FILTER", "滤镜", "选择适合图片的色彩预设");
             UpdateFilterPreview();
         }
 
+        private void CancelFilterOptions(object sender, EventArgs e)
+        {
+            ClearFilterPreview();
+            if (_filterChoice.SelectedIndex != 0) _filterChoice.SelectedIndex = 0;
+            OpenColorOptions(sender, e);
+            _status.Text = "已取消滤镜预览，图片保持当前效果。";
+        }
+
         private void ApplySelectedFilter(object sender, EventArgs e)
         {
-            if (_processing || _filterPreview == null || _filterPreviewIndex != _filterChoice.SelectedIndex) return;
+            if (_processing || _filterChoice.SelectedIndex <= 0 || _filterPreview == null || _filterPreviewIndex != _filterChoice.SelectedIndex) return;
             int selected = _filterChoice.SelectedIndex;
             Bitmap applied = (Bitmap)_filterPreview.Clone();
             ClearFilterPreview();
@@ -715,7 +728,13 @@ namespace LocalPhotoViewer
 
         private void UpdateFilterPreview()
         {
-            if (_filterChoice == null || _filterChoice.SelectedIndex < 0 || _processing) return;
+            if (_filterChoice == null || _processing) return;
+            if (_filterChoice.SelectedIndex <= 0)
+            {
+                ClearFilterPreview();
+                if (_filterChoice.Visible) _status.Text = "请选择滤镜查看预览；确认后点击“应用滤镜”。";
+                return;
+            }
             int request = ++_filterPreviewRequest;
             int version = _imageVersion;
             int selected = _filterChoice.SelectedIndex;
@@ -729,7 +748,7 @@ namespace LocalPhotoViewer
             {
                 try
                 {
-                    int mode = selected + 1;
+                    int mode = selected;
                     return AdjustBitmap(snapshot, 0, mode == 5 ? 115 : 100, mode == 6 ? 45 : (mode == 5 ? 145 : 100), mode);
                 }
                 finally { snapshot.Dispose(); }
@@ -1220,8 +1239,10 @@ namespace LocalPhotoViewer
             }
             catch (Exception ex)
             {
-                _status.Text = "处理失败：" + ex.Message;
-                MessageBox.Show(this, ex.Message, "处理失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                string message = ex.GetBaseException().Message;
+                if (String.IsNullOrEmpty(message)) message = ex.Message;
+                _status.Text = "处理失败：" + message;
+                MessageBox.Show(this, message, "处理失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -1726,67 +1747,74 @@ namespace LocalPhotoViewer
         private static Bitmap Convolve(Bitmap source, bool sharpen)
         {
             Bitmap src = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
-            using (Graphics graphics = Graphics.FromImage(src)) graphics.DrawImage(source, 0, 0, source.Width, source.Height);
-            Bitmap result = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
-            Rectangle bounds = new Rectangle(0, 0, src.Width, src.Height);
-            BitmapData inputData = null;
-            BitmapData outputData = null;
-            bool completed = false;
             try
             {
-                inputData = src.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-                outputData = result.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
-                int rowBytes = checked(src.Width * 4);
-                byte[] input = new byte[checked(rowBytes * src.Height)];
-                for (int y = 0; y < src.Height; y++)
-                    Marshal.Copy(IntPtr.Add(inputData.Scan0, y * inputData.Stride), input, y * rowBytes, rowBytes);
-
-                Parallel.For<byte[]>(0, src.Height,
-                delegate { return new byte[rowBytes]; },
-                delegate(int y, ParallelLoopState state, byte[] row)
+                using (Graphics graphics = Graphics.FromImage(src)) graphics.DrawImage(source, 0, 0, source.Width, source.Height);
+                Rectangle bounds = new Rectangle(0, 0, src.Width, src.Height);
+                BitmapData data = null;
+                try
                 {
-                    int topY = Math.Max(0, y - 1) * rowBytes;
-                    int midY = y * rowBytes;
-                    int bottomY = Math.Min(src.Height - 1, y + 1) * rowBytes;
-                    for (int x = 0; x < src.Width; x++)
+                    data = src.LockBits(bounds, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+                    int rowBytes = checked(src.Width * 4);
+                    byte[] previous = new byte[rowBytes];
+                    byte[] current = new byte[rowBytes];
+                    byte[] next = new byte[rowBytes];
+                    byte[] output = new byte[rowBytes];
+                    Marshal.Copy(IntPtr.Add(data.Scan0, 0), current, 0, rowBytes);
+                    Buffer.BlockCopy(current, 0, previous, 0, rowBytes);
+                    if (src.Height > 1) Marshal.Copy(IntPtr.Add(data.Scan0, data.Stride), next, 0, rowBytes);
+                    else Buffer.BlockCopy(current, 0, next, 0, rowBytes);
+
+                    for (int y = 0; y < src.Height; y++)
                     {
-                        int offset = x * 4;
-                        int left = Math.Max(0, x - 1) * 4;
-                        int right = Math.Min(src.Width - 1, x + 1) * 4;
-                        for (int channel = 0; channel < 3; channel++)
+                        for (int x = 0; x < src.Width; x++)
                         {
-                            int value;
-                            if (sharpen)
-                                value = input[midY + offset + channel] * 5 - input[midY + left + channel] - input[midY + right + channel] - input[topY + offset + channel] - input[bottomY + offset + channel];
-                            else
+                            int offset = x * 4;
+                            int left = Math.Max(0, x - 1) * 4;
+                            int right = Math.Min(src.Width - 1, x + 1) * 4;
+                            for (int channel = 0; channel < 3; channel++)
                             {
-                                int sum = 0;
-                                for (int dy = -1; dy <= 1; dy++)
+                                int value;
+                                if (sharpen)
+                                    value = current[offset + channel] * 5 - current[left + channel] - current[right + channel] - previous[offset + channel] - next[offset + channel];
+                                else
                                 {
-                                    int rowOffset = (dy < 0 ? topY : (dy > 0 ? bottomY : midY));
+                                    int sum = 0;
                                     for (int dx = -1; dx <= 1; dx++)
-                                        sum += input[rowOffset + Math.Max(0, Math.Min(src.Width - 1, x + dx)) * 4 + channel];
+                                    {
+                                        int sample = Math.Max(0, Math.Min(src.Width - 1, x + dx)) * 4 + channel;
+                                        sum += previous[sample] + current[sample] + next[sample];
+                                    }
+                                    value = (sum + 4) / 9;
                                 }
-                                value = (sum + 4) / 9;
+                                output[offset + channel] = (byte)Math.Max(0, Math.Min(255, value));
                             }
-                            row[offset + channel] = (byte)Math.Max(0, Math.Min(255, value));
+                            output[offset + 3] = current[offset + 3];
                         }
-                        row[offset + 3] = input[midY + offset + 3];
+                        Marshal.Copy(output, 0, IntPtr.Add(data.Scan0, y * data.Stride), rowBytes);
+
+                        if (y + 1 < src.Height)
+                        {
+                            byte[] swap = previous;
+                            previous = current;
+                            current = next;
+                            next = swap;
+                            if (y + 2 < src.Height) Marshal.Copy(IntPtr.Add(data.Scan0, (y + 2) * data.Stride), next, 0, rowBytes);
+                            else Buffer.BlockCopy(current, 0, next, 0, rowBytes);
+                        }
                     }
-                    Marshal.Copy(row, 0, IntPtr.Add(outputData.Scan0, y * outputData.Stride), rowBytes);
-                    return row;
-                },
-                delegate(byte[] row) { });
-                completed = true;
+                }
+                finally
+                {
+                    if (data != null) src.UnlockBits(data);
+                }
+                return src;
             }
-            finally
+            catch
             {
-                if (outputData != null) result.UnlockBits(outputData);
-                if (inputData != null) src.UnlockBits(inputData);
                 src.Dispose();
-                if (!completed) result.Dispose();
+                throw;
             }
-            return result;
         }
     }
 

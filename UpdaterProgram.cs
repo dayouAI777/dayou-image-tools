@@ -396,6 +396,7 @@ namespace DayouImageToolsUpdater
         private Version _installedVersion;
         private bool _working;
         private bool _installationValid;
+        private bool _allowClose;
 
         public UpdaterForm(string[] args)
         {
@@ -497,7 +498,7 @@ namespace DayouImageToolsUpdater
             _fileList.AllowDrop = true;
             _fileList.DragEnter += OnPackageDragEnter;
             _fileList.DragDrop += OnPackageDragDrop;
-            FormClosing += delegate(object sender, FormClosingEventArgs e) { if (_working) e.Cancel = true; };
+            FormClosing += delegate(object sender, FormClosingEventArgs e) { if (_working && !_allowClose) e.Cancel = true; };
 
             if (args != null && args.Length > 0)
                 LoadPackage(args[0]);
@@ -537,7 +538,20 @@ namespace DayouImageToolsUpdater
             _onlineButton.Enabled = false;
             _status.ForeColor = Color.FromArgb(45, 98, 111);
             _status.Text = "正在连接 GitHub 检查更新…";
-            Task.Run(delegate { return GitHubReleaseClient.GetLatestRelease(); }).ContinueWith(delegate(Task<GitHubReleaseInfo> task)
+            Task.Run(delegate
+            {
+                return GitHubReleaseClient.GetLatestRelease(delegate(int nextAttempt)
+                {
+                    try
+                    {
+                        BeginInvoke((MethodInvoker)delegate
+                        {
+                            _status.Text = "连接不稳定，正在自动重试检查更新（第 " + nextAttempt + "/3 次）…";
+                        });
+                    }
+                    catch (InvalidOperationException) { }
+                });
+            }).ContinueWith(delegate(Task<GitHubReleaseInfo> task)
             {
                 try
                 {
@@ -604,19 +618,29 @@ namespace DayouImageToolsUpdater
             Task.Run(delegate
             {
                 return GitHubReleaseClient.DownloadAsset(release, delegate(long received, long total)
-                {
-                    try
                     {
-                        BeginInvoke((MethodInvoker)delegate
+                        try
                         {
-                            if (total > 0)
-                                _status.Text = "正在下载更新：" + FormatBytes(received) + " / " + FormatBytes(total);
-                            else
-                                _status.Text = "正在下载更新：" + FormatBytes(received);
-                        });
-                    }
-                    catch (InvalidOperationException) { }
-                });
+                            BeginInvoke((MethodInvoker)delegate
+                            {
+                                if (total > 0)
+                                    _status.Text = "正在下载更新：" + FormatBytes(received) + " / " + FormatBytes(total);
+                                else
+                                    _status.Text = "正在下载更新：" + FormatBytes(received);
+                            });
+                        }
+                        catch (InvalidOperationException) { }
+                    }, delegate(int nextAttempt)
+                    {
+                        try
+                        {
+                            BeginInvoke((MethodInvoker)delegate
+                            {
+                                _status.Text = "下载中断，正在自动重试（第 " + nextAttempt + "/3 次）…";
+                            });
+                        }
+                        catch (InvalidOperationException) { }
+                    });
             }).ContinueWith(delegate(Task<string> task)
             {
                 try
@@ -853,20 +877,24 @@ namespace DayouImageToolsUpdater
         private void CloseAfterApply()
         {
             if (_working) return;
+            AppendDiagnosticLog("用户点击关闭更新器。");
+            Exception launchFailure = null;
             if (_restartAfterClose)
             {
                 try
                 {
                     Process.Start(new ProcessStartInfo(_mainPath) { WorkingDirectory = _installDirectory, UseShellExecute = true });
-                    _restartAfterClose = false;
                 }
                 catch (Exception ex)
                 {
                     AppendDiagnosticLog("更新后启动主程序失败：" + ex);
-                    MessageBox.Show(this, "更新已经完成，但启动新版本失败。请从桌面或开始菜单启动程序。\n\n" + ex.Message, "启动失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
+                    launchFailure = ex;
                 }
+                finally { _restartAfterClose = false; }
             }
+            if (launchFailure != null)
+                MessageBox.Show(this, "更新已经完成，但启动新版本失败。更新器将关闭，请从桌面或开始菜单启动程序。\n\n" + launchFailure.Message, "启动失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            _allowClose = true;
             Close();
         }
 
