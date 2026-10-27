@@ -243,6 +243,7 @@ namespace LocalPhotoViewer
             file.DropDownItems.Add(MenuItem("图片信息 / EXIF…", Keys.None, delegate { ShowCurrentInfo(); }));
             file.DropDownItems.Add(new ToolStripSeparator());
             file.DropDownItems.Add(MenuItem("另存为…", Keys.Control | Keys.S, delegate { SaveAs(); }));
+            file.DropDownItems.Add(MenuItem("压缩当前图片…", Keys.None, delegate { CompressCurrentImage(); }));
             file.DropDownItems.Add(MenuItem("GIF 全部帧另存为 PNG…", Keys.None, delegate { SaveAllFrames(); }));
             file.DropDownItems.Add(MenuItem("打印…", Keys.Control | Keys.P, delegate { PrintImage(); }));
             file.DropDownItems.Add(MenuItem("在文件夹中显示", Keys.None, delegate { OpenCurrentFolder(); }));
@@ -335,6 +336,16 @@ namespace LocalPhotoViewer
         {
             if (_index < 0 || _index >= _files.Count || _canvas.CurrentImage == null) return;
             using (PhotoEditorForm editor = new PhotoEditorForm(_files[_index])) editor.ShowDialog(this);
+        }
+
+        private void CompressCurrentImage()
+        {
+            if (_index < 0 || _index >= _files.Count || _canvas.CurrentImage == null) return;
+            using (ImageCompressionForm dialog = new ImageCompressionForm(_files[_index]))
+            {
+                if (dialog.ShowDialog(this) == DialogResult.OK && !String.IsNullOrEmpty(dialog.OutputPath))
+                    _statusText.Text = "已另存压缩副本：" + Path.GetFileName(dialog.OutputPath) + "；" + dialog.Summary;
+            }
         }
 
         private void OpenBatchTools()
@@ -480,6 +491,7 @@ namespace LocalPhotoViewer
             bar.Items.Add(Button("打开", "打开图片文件", delegate { OpenFiles(); }));
             bar.Items.Add(Button("文件夹", "打开文件夹中的图片", delegate { OpenFolder(); }));
             bar.Items.Add(Button("编辑", "裁剪、调色、滤镜、标注、水印、尺寸等", delegate { OpenEditor(); }));
+            bar.Items.Add(Button("压缩", "按目标体积压缩当前图片", delegate { CompressCurrentImage(); }));
             bar.Items.Add(Button("批处理", "批量尺寸、裁剪、压缩、转换、旋转、命名、水印、复制、移动、回收站", delegate { OpenBatchTools(); }));
             bar.Items.Add(Button("信息", "查看尺寸、文件属性与 EXIF", delegate { ShowCurrentInfo(); }));
             bar.Items.Add(new ToolStripSeparator());

@@ -85,6 +85,7 @@ namespace LocalPhotoViewer
         private TabPage _borderPage;
         private ToolStrip _toolbar;
         private MenuStrip _menu;
+        private int _hoveredSideTabIndex = -1;
         private bool _updatingSideTabs;
         private Color _drawColor = Color.Red;
         private Color _borderColor = Color.White;
@@ -265,6 +266,9 @@ namespace LocalPhotoViewer
         {
             _sideTabs = new TabControl { Dock = DockStyle.Fill, Padding = new Point(12, 5), DrawMode = TabDrawMode.OwnerDrawFixed, ItemSize = new Size(64, 36), SizeMode = TabSizeMode.Fixed, BackColor = Paper };
             _sideTabs.DrawItem += DrawEditorialTab;
+            _sideTabs.MouseMove += SideTabsMouseMove;
+            _sideTabs.MouseLeave += SideTabsMouseLeave;
+            _sideTabs.Cursor = Cursors.Hand;
 
             _cropPage = new TabPage("裁剪");
             AddSectionTitle(_cropPage, "裁剪比例", 14, 18);
@@ -466,8 +470,40 @@ namespace LocalPhotoViewer
             Button button = new Button { Text = text, Location = new Point(x, y), Size = new Size(width, height), FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold), BackColor = primary ? Coral : Paper, ForeColor = primary ? Color.White : Navy, Cursor = Cursors.Hand };
             button.FlatAppearance.BorderSize = primary ? 0 : 1;
             button.FlatAppearance.BorderColor = primary ? Coral : Mint;
-            button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(198, 66, 62) : PaperShade;
+            button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(238, 105, 96) : Color.FromArgb(220, 239, 230);
+            button.FlatAppearance.MouseDownBackColor = primary ? Color.FromArgb(183, 58, 53) : Color.FromArgb(203, 226, 216);
             return button;
+        }
+
+        private void SideTabsMouseMove(object sender, MouseEventArgs e)
+        {
+            int hovered = -1;
+            for (int i = 0; i < _sideTabs.TabPages.Count; i++)
+            {
+                if (_sideTabs.GetTabRect(i).Contains(e.Location))
+                {
+                    hovered = i;
+                    break;
+                }
+            }
+            SetHoveredSideTab(hovered);
+        }
+
+        private void SideTabsMouseLeave(object sender, EventArgs e)
+        {
+            SetHoveredSideTab(-1);
+        }
+
+        private void SetHoveredSideTab(int index)
+        {
+            if (_hoveredSideTabIndex == index) return;
+            int previous = _hoveredSideTabIndex;
+            _hoveredSideTabIndex = index;
+            if (_sideTabs == null || _sideTabs.IsDisposed) return;
+            if (previous >= 0 && previous < _sideTabs.TabPages.Count)
+                _sideTabs.Invalidate(_sideTabs.GetTabRect(previous));
+            if (index >= 0 && index < _sideTabs.TabPages.Count)
+                _sideTabs.Invalidate(_sideTabs.GetTabRect(index));
         }
 
         private void DrawEditorialTab(object sender, DrawItemEventArgs e)
@@ -475,12 +511,18 @@ namespace LocalPhotoViewer
             TabControl tabs = sender as TabControl;
             if (tabs == null || e.Index < 0 || e.Index >= tabs.TabPages.Count) return;
             bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+            bool hovered = !selected && e.Index == _hoveredSideTabIndex;
             Rectangle bounds = e.Bounds;
-            using (Brush background = new SolidBrush(selected ? Paper : PaperShade))
+            using (Brush background = new SolidBrush(selected ? Paper : (hovered ? Color.FromArgb(220, 239, 230) : PaperShade)))
                 e.Graphics.FillRectangle(background, bounds);
-            TextRenderer.DrawText(e.Graphics, tabs.TabPages[e.Index].Text, new Font("Microsoft YaHei UI", 8.5f, selected ? FontStyle.Bold : FontStyle.Regular), bounds, selected ? Navy : MutedInk, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(e.Graphics, tabs.TabPages[e.Index].Text, new Font("Microsoft YaHei UI", 8.5f, selected || hovered ? FontStyle.Bold : FontStyle.Regular), bounds, selected ? Navy : (hovered ? Navy : MutedInk), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             if (selected)
                 using (Pen accent = new Pen(Coral, 3f)) e.Graphics.DrawLine(accent, bounds.Left + 12, bounds.Bottom - 2, bounds.Right - 12, bounds.Bottom - 2);
+            else if (hovered)
+            {
+                using (Pen outline = new Pen(Mint, 1f)) e.Graphics.DrawRectangle(outline, Rectangle.Inflate(bounds, -1, -1));
+                using (Pen accent = new Pen(Mint, 2f)) e.Graphics.DrawLine(accent, bounds.Left + 12, bounds.Bottom - 2, bounds.Right - 12, bounds.Bottom - 2);
+            }
         }
 
         internal static void ApplyEditorialTheme(Control root)
@@ -3143,17 +3185,17 @@ namespace LocalPhotoViewer
                 path.AddArc(bounds.Right - radius * 2, bounds.Bottom - radius * 2, radius * 2, radius * 2, 0, 90);
                 path.AddArc(bounds.Left, bounds.Bottom - radius * 2, radius * 2, radius * 2, 90, 90);
                 path.CloseFigure();
-                Color fill = e.Item.Pressed ? _coral : (_menu ? _paperShade : _navySoftColor());
+                Color fill = e.Item.Pressed ? _coral : (_menu ? _paperShade : _navyHoverColor());
                 using (Brush brush = new SolidBrush(fill)) e.Graphics.FillPath(brush, path);
                 if (!_menu && e.Item.Selected && !e.Item.Pressed)
-                    using (Pen line = new Pen(_mint, 1f)) e.Graphics.DrawPath(line, path);
+                    using (Pen line = new Pen(Color.FromArgb(165, 224, 204), 2f)) e.Graphics.DrawPath(line, path);
             }
         }
 
         protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
         {
             if (!e.Item.Selected && !e.Item.Pressed) return;
-            using (Brush brush = new SolidBrush(e.Item.Pressed ? _paperShade : Color.FromArgb(222, 239, 231)))
+            using (Brush brush = new SolidBrush(e.Item.Pressed ? _paperShade : Color.FromArgb(207, 232, 220)))
                 e.Graphics.FillRectangle(brush, new Rectangle(Point.Empty, e.Item.Size));
         }
 
@@ -3167,9 +3209,9 @@ namespace LocalPhotoViewer
             }
         }
 
-        private Color _navySoftColor()
+        private Color _navyHoverColor()
         {
-            return Color.FromArgb(Math.Min(255, _navy.R + 18), Math.Min(255, _navy.G + 20), Math.Min(255, _navy.B + 20));
+            return Color.FromArgb(Math.Min(255, _navy.R + 40), Math.Min(255, _navy.G + 58), Math.Min(255, _navy.B + 64));
         }
     }
 

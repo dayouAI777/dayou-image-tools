@@ -36,7 +36,7 @@ if not exist "%FACADE%" (
   echo .NET Standard reference facade was not found: "%FACADE%"
   exit /b 1
 )
-"%CSC%" /nologo /target:winexe /platform:x64 /win32icon:"%ROOT%DayouImageTools.ico" /out:"%ROOT%bin\DayouImageTools.exe" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:Microsoft.VisualBasic.dll /reference:"%FACADE%" /reference:"%MAGICK%\Magick.NET-Q8-x64.dll" /reference:"%MAGICK%\Magick.NET.Core.dll" "%ROOT%AssemblyInfo.cs" "%ROOT%Program.cs" "%ROOT%PhotoEditorForm.cs" "%ROOT%BatchToolsForm.cs" "%ROOT%ImageDecoder.cs"
+"%CSC%" /nologo /target:winexe /platform:x64 /win32icon:"%ROOT%DayouImageTools.ico" /out:"%ROOT%bin\DayouImageTools.exe" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:Microsoft.VisualBasic.dll /reference:"%FACADE%" /reference:"%MAGICK%\Magick.NET-Q8-x64.dll" /reference:"%MAGICK%\Magick.NET.Core.dll" "%ROOT%AssemblyInfo.cs" "%ROOT%Program.cs" "%ROOT%PhotoEditorForm.cs" "%ROOT%BatchToolsForm.cs" "%ROOT%ImageDecoder.cs" "%ROOT%ImageCompressionForm.cs"
 if errorlevel 1 exit /b 1
 copy /y "%ROOT%DayouImageTools.ico" "%ROOT%bin\DayouImageTools.ico" >nul
 copy /y "%MAGICK%\Magick.NET-Q8-x64.dll" "%ROOT%bin\Magick.NET-Q8-x64.dll" >nul
