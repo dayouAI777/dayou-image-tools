@@ -1,5 +1,5 @@
 #define MyAppName "大有图片工具"
-#define MyAppVersion "1.3.8"
+#define MyAppVersion "1.3.9"
 #define MyAppExeName "DayouImageTools.exe"
 
 [Setup]

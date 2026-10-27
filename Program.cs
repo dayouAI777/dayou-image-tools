@@ -111,6 +111,13 @@ namespace LocalPhotoViewer
         private readonly List<string> _files = new List<string>();
         private CancellationTokenSource _thumbnailCancellation;
         private CancellationTokenSource _folderScanCancellation;
+        private readonly Queue<Tuple<int, string>> _thumbnailRequests = new Queue<Tuple<int, string>>();
+        private readonly HashSet<int> _thumbnailRequested = new HashSet<int>();
+        private bool _thumbnailWorkerRunning;
+        private Timer _thumbnailPopulateTimer;
+        private string[] _thumbnailPopulation;
+        private int _thumbnailPopulationIndex;
+        private int _thumbnailPopulationGeneration;
         private int _thumbnailGeneration;
         private int _folderScanGeneration;
         private bool _uiReady;
@@ -202,6 +209,11 @@ namespace LocalPhotoViewer
                 _folderScanGeneration++;
                 CancelThumbnailGeneration();
                 CancelFolderScan();
+                if (_thumbnailPopulateTimer != null)
+                {
+                    _thumbnailPopulateTimer.Stop();
+                    _thumbnailPopulateTimer.Dispose();
+                }
                 _slideTimer.Stop();
                 _canvas.ClearImage();
                 _thumbnailList.LargeImageList = null;
@@ -530,6 +542,7 @@ namespace LocalPhotoViewer
         {
             Rectangle bounds = e.Bounds;
             if (bounds.Width < 12 || bounds.Height < 18) return;
+            if (e.Item.ImageIndex == 0) RequestVisibleThumbnail(e.Item.Index);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             Rectangle card = Rectangle.Inflate(bounds, -2, -2);
             Color cardColor = e.Item.Selected ? Color.FromArgb(225, 241, 233) : Color.FromArgb(255, 253, 248);
@@ -547,7 +560,7 @@ namespace LocalPhotoViewer
                 e.Graphics.DrawRectangle(imageFrame, imageBounds);
 
             Rectangle caption = new Rectangle(bounds.Left + 4, imageBounds.Bottom + 4, bounds.Width - 8, Math.Max(14, bounds.Bottom - imageBounds.Bottom - 7));
-            TextRenderer.DrawText(e.Graphics, e.Item.Text, new Font("Microsoft YaHei UI", 8f, FontStyle.Regular), caption, PhotoEditorForm.Navy, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(e.Graphics, e.Item.Text, _thumbnailList.Font, caption, PhotoEditorForm.Navy, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             using (Pen outline = new Pen(e.Item.Selected ? PhotoEditorForm.Coral : Color.FromArgb(222, 214, 197), e.Item.Selected ? 2f : 1f))
                 e.Graphics.DrawRectangle(outline, card);
         }
@@ -818,6 +831,8 @@ namespace LocalPhotoViewer
         {
             CancelThumbnailGeneration();
             int generation = ++_thumbnailGeneration;
+            if (_thumbnailPopulateTimer != null) _thumbnailPopulateTimer.Stop();
+            _thumbnailPopulation = null;
             _syncingSelection = true;
             _thumbnailList.BeginUpdate();
             try
@@ -831,14 +846,6 @@ namespace LocalPhotoViewer
                 Bitmap placeholder = CreateThumbnailPlaceholder();
                 _thumbnailBitmapOwners.Add(placeholder);
                 _thumbnailImages.Images.Add(placeholder);
-                for (int i = 0; i < _files.Count; i++)
-                    _thumbnailList.Items.Add(new ListViewItem(Path.GetFileName(_files[i]), 0) { Tag = i });
-
-                if (_index >= 0 && _index < _thumbnailList.Items.Count)
-                {
-                    _thumbnailList.Items[_index].Selected = true;
-                    _thumbnailList.Items[_index].Focused = true;
-                }
             }
             finally
             {
@@ -849,7 +856,58 @@ namespace LocalPhotoViewer
 
             if (startThumbnailWork && _uiReady && generation == _thumbnailGeneration)
                 StartThumbnailGeneration();
+            _thumbnailPopulation = _files.ToArray();
+            _thumbnailPopulationIndex = 0;
+            _thumbnailPopulationGeneration = generation;
+            PopulateThumbnailBatch();
+            if (_thumbnailPopulation != null && _uiReady)
+            {
+                if (_thumbnailPopulateTimer == null)
+                {
+                    _thumbnailPopulateTimer = new Timer { Interval = 15 };
+                    _thumbnailPopulateTimer.Tick += delegate { PopulateThumbnailBatch(); };
+                }
+                _thumbnailPopulateTimer.Start();
+            }
             PositionFloatingNavigationButtons();
+        }
+
+        private void PopulateThumbnailBatch()
+        {
+            if (_thumbnailPopulation == null || IsDisposed || _thumbnailPopulationGeneration != _thumbnailGeneration)
+            {
+                if (_thumbnailPopulateTimer != null) _thumbnailPopulateTimer.Stop();
+                _thumbnailPopulation = null;
+                return;
+            }
+            int start = _thumbnailPopulationIndex;
+            int end = _uiReady ? Math.Min(start + 128, _thumbnailPopulation.Length) : _thumbnailPopulation.Length;
+            _syncingSelection = true;
+            _thumbnailList.BeginUpdate();
+            try
+            {
+                ListViewItem[] items = new ListViewItem[end - start];
+                for (int i = start; i < end; i++)
+                    items[i - start] = new ListViewItem(Path.GetFileName(_thumbnailPopulation[i]), 0) { Tag = i };
+                if (items.Length > 0) _thumbnailList.Items.AddRange(items);
+                if (_index >= start && _index < end)
+                {
+                    _thumbnailList.Items[_index].Selected = true;
+                    _thumbnailList.Items[_index].Focused = true;
+                    _thumbnailList.EnsureVisible(_index);
+                }
+            }
+            finally
+            {
+                _thumbnailList.EndUpdate();
+                _syncingSelection = false;
+            }
+            _thumbnailPopulationIndex = end;
+            if (end >= _thumbnailPopulation.Length)
+            {
+                _thumbnailPopulation = null;
+                if (_thumbnailPopulateTimer != null) _thumbnailPopulateTimer.Stop();
+            }
         }
 
         private static Bitmap CreateThumbnailPlaceholder()
@@ -870,35 +928,82 @@ namespace LocalPhotoViewer
         {
             if (!_uiReady || IsDisposed || _files.Count == 0) return;
             CancelThumbnailGeneration();
-            CancellationTokenSource cancellation = new CancellationTokenSource();
-            _thumbnailCancellation = cancellation;
-            CancellationToken token = cancellation.Token;
-            int generation = _thumbnailGeneration;
-            int limit = Math.Min(500, _files.Count);
-            List<Tuple<int, string>> work = new List<Tuple<int, string>>(limit);
-            if (_index >= 0 && _index < limit)
-                work.Add(Tuple.Create(_index, _files[_index]));
-            for (int i = 0; i < limit; i++)
-                if (i != _index) work.Add(Tuple.Create(i, _files[i]));
-            Size imageSize = _thumbnailImages.ImageSize;
+            _thumbnailCancellation = new CancellationTokenSource();
+            _thumbnailList.Invalidate();
+        }
 
-            Task.Run(delegate
+        private void RequestVisibleThumbnail(int index)
+        {
+            if (!_uiReady || IsDisposed || _thumbnailCancellation == null ||
+                index < 0 || index >= _files.Count || index >= _thumbnailList.Items.Count ||
+                _thumbnailImages.Images.Count >= 501 || !_thumbnailRequested.Add(index)) return;
+            _thumbnailRequests.Enqueue(Tuple.Create(index, _files[index]));
+            BeginNextVisibleThumbnail();
+        }
+
+        private void BeginNextVisibleThumbnail()
+        {
+            if (_thumbnailWorkerRunning || _thumbnailCancellation == null || IsDisposed) return;
+            while (_thumbnailRequests.Count > 0 && _thumbnailImages.Images.Count < 501)
             {
-                List<Tuple<int, Bitmap>> batch = new List<Tuple<int, Bitmap>>(8);
-                foreach (Tuple<int, string> item in work)
+                Tuple<int, string> request = _thumbnailRequests.Dequeue();
+                int index = request.Item1;
+                if (index >= _thumbnailList.Items.Count || index >= _files.Count ||
+                    _thumbnailList.Items[index].ImageIndex != 0 ||
+                    !_thumbnailList.Items[index].Bounds.IntersectsWith(_thumbnailList.ClientRectangle))
                 {
-                    if (token.IsCancellationRequested) break;
-                    Bitmap thumb = CreateThumbnail(item.Item2, imageSize);
-                    if (thumb == null) continue;
-                    batch.Add(Tuple.Create(item.Item1, thumb));
-                    if (batch.Count >= 8)
-                    {
-                        PostThumbnailBatch(batch, generation, token);
-                        batch = new List<Tuple<int, Bitmap>>(8);
-                    }
+                    _thumbnailRequested.Remove(index);
+                    continue;
                 }
-                if (batch.Count > 0) PostThumbnailBatch(batch, generation, token);
-            }, token);
+
+                _thumbnailWorkerRunning = true;
+                int generation = _thumbnailGeneration;
+                CancellationToken token = _thumbnailCancellation.Token;
+                Size imageSize = _thumbnailImages.ImageSize;
+                Task.Run(delegate
+                {
+                    Bitmap thumb = token.IsCancellationRequested ? null : CreateThumbnail(request.Item2, imageSize);
+                    if (token.IsCancellationRequested || IsDisposed || !IsHandleCreated)
+                    {
+                        if (thumb != null) thumb.Dispose();
+                        return;
+                    }
+                    try
+                    {
+                        BeginInvoke((MethodInvoker)delegate
+                        {
+                            if (IsDisposed || token.IsCancellationRequested || generation != _thumbnailGeneration)
+                            {
+                                if (thumb != null) thumb.Dispose();
+                                return;
+                            }
+                            _thumbnailWorkerRunning = false;
+                            bool retained = false;
+                            try
+                            {
+                                if (thumb != null && index < _thumbnailList.Items.Count && index < _files.Count &&
+                                    String.Equals(_files[index], request.Item2, StringComparison.OrdinalIgnoreCase) &&
+                                    _thumbnailList.Items[index].ImageIndex == 0 && _thumbnailImages.Images.Count < 501)
+                                {
+                                    int imageIndex = _thumbnailImages.Images.Count;
+                                    _thumbnailImages.Images.Add(thumb);
+                                    _thumbnailBitmapOwners.Add(thumb);
+                                    retained = true;
+                                    _thumbnailList.Items[index].ImageIndex = imageIndex;
+                                }
+                            }
+                            catch { }
+                            finally
+                            {
+                                if (!retained && thumb != null) thumb.Dispose();
+                                BeginNextVisibleThumbnail();
+                            }
+                        });
+                    }
+                    catch (InvalidOperationException) { if (thumb != null) thumb.Dispose(); }
+                });
+                return;
+            }
         }
 
         private static Bitmap CreateThumbnail(string path, Size size)
@@ -931,59 +1036,17 @@ namespace LocalPhotoViewer
             catch { return null; }
         }
 
-        private void PostThumbnailBatch(List<Tuple<int, Bitmap>> batch, int generation, CancellationToken token)
-        {
-            List<Tuple<int, Bitmap>> pending = batch;
-            try
-            {
-                BeginInvoke((MethodInvoker)delegate
-                {
-                    if (IsDisposed || token.IsCancellationRequested || generation != _thumbnailGeneration)
-                    {
-                        DisposeThumbnailBatch(pending);
-                        return;
-                    }
-
-                    foreach (Tuple<int, Bitmap> item in pending)
-                    {
-                        bool retained = false;
-                        try
-                        {
-                            if (item.Item1 < 0 || item.Item1 >= _thumbnailList.Items.Count)
-                            {
-                                item.Item2.Dispose();
-                                continue;
-                            }
-                            int imageIndex = _thumbnailImages.Images.Count;
-                            _thumbnailImages.Images.Add(item.Item2);
-                            _thumbnailBitmapOwners.Add(item.Item2);
-                            retained = true;
-                            _thumbnailList.Items[item.Item1].ImageIndex = imageIndex;
-                        }
-                        catch
-                        {
-                            if (!retained) item.Item2.Dispose();
-                        }
-                    }
-                    pending.Clear();
-                });
-            }
-            catch (InvalidOperationException) { DisposeThumbnailBatch(pending); }
-        }
-
-        private static void DisposeThumbnailBatch(List<Tuple<int, Bitmap>> batch)
-        {
-            foreach (Tuple<int, Bitmap> item in batch)
-                if (item.Item2 != null) item.Item2.Dispose();
-            batch.Clear();
-        }
-
         private void CancelThumbnailGeneration()
         {
-            if (_thumbnailCancellation == null) return;
-            _thumbnailCancellation.Cancel();
-            _thumbnailCancellation.Dispose();
-            _thumbnailCancellation = null;
+            if (_thumbnailCancellation != null)
+            {
+                _thumbnailCancellation.Cancel();
+                _thumbnailCancellation.Dispose();
+                _thumbnailCancellation = null;
+            }
+            _thumbnailRequests.Clear();
+            _thumbnailRequested.Clear();
+            _thumbnailWorkerRunning = false;
         }
 
         private void CancelFolderScan()
