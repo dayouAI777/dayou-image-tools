@@ -252,6 +252,8 @@ namespace LocalPhotoViewer
             file.DropDownItems.Add(new ToolStripSeparator());
             file.DropDownItems.Add(MenuItem("编辑当前图片…", Keys.Control | Keys.E, delegate { OpenEditor(); }));
             file.DropDownItems.Add(MenuItem("批量图片工具…", Keys.None, delegate { OpenBatchTools(); }));
+            file.DropDownItems.Add(MenuItem("自由拼图…", Keys.None, delegate { OpenCollage(); }));
+            file.DropDownItems.Add(MenuItem("图片对比…", Keys.None, delegate { OpenImageCompare(); }));
             file.DropDownItems.Add(MenuItem("图片信息 / EXIF…", Keys.None, delegate { ShowCurrentInfo(); }));
             file.DropDownItems.Add(new ToolStripSeparator());
             file.DropDownItems.Add(MenuItem("另存为…", Keys.Control | Keys.S, delegate { SaveAs(); }));
@@ -278,6 +280,8 @@ namespace LocalPhotoViewer
 
             ToolStripMenuItem tools = new ToolStripMenuItem("工具(&T)");
             tools.DropDownItems.Add(MenuItem("批量尺寸 / 裁剪 / 压缩 / 转换 / 旋转 / 命名 / 水印 / 文件整理…", Keys.None, delegate { OpenBatchTools(); }));
+            tools.DropDownItems.Add(MenuItem("自由拼图…", Keys.None, delegate { OpenCollage(); }));
+            tools.DropDownItems.Add(MenuItem("图片对比…", Keys.None, delegate { OpenImageCompare(); }));
             tools.DropDownItems.Add(MenuItem("删除当前图片…", Keys.Delete, delegate { DeleteCurrentFile(); }));
             tools.DropDownItems.Add(MenuItem("重命名当前图片…", Keys.F2, delegate { RenameCurrentFile(); }));
             tools.DropDownItems.Add(MenuItem("复制图片到剪贴板", Keys.None, delegate { CopyCurrentImage(); }));
@@ -335,6 +339,8 @@ namespace LocalPhotoViewer
             menu.Items.Add(MenuItem("打开 / 查看", Keys.None, delegate { if (_thumbnailList.FocusedItem != null) { _index = _thumbnailList.FocusedItem.Index; DisplayCurrent(); } }));
             menu.Items.Add(MenuItem("编辑当前图片…", Keys.None, delegate { OpenEditor(); }));
             menu.Items.Add(MenuItem("批量处理所选图片…", Keys.None, delegate { OpenBatchTools(); }));
+            menu.Items.Add(MenuItem("自由拼图…", Keys.None, delegate { OpenCollage(); }));
+            menu.Items.Add(MenuItem("图片对比…", Keys.None, delegate { OpenImageCompare(); }));
             menu.Items.Add(MenuItem("图片信息 / EXIF…", Keys.None, delegate { ShowCurrentInfo(); }));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(MenuItem("重命名…", Keys.None, delegate { RenameCurrentFile(); }));
@@ -381,6 +387,27 @@ namespace LocalPhotoViewer
             }
             RefreshThumbnailList();
             DisplayCurrent();
+        }
+
+        private void OpenCollage()
+        {
+            List<string> targets = new List<string>();
+            if (_thumbnailList.SelectedIndices.Count > 0)
+            {
+                foreach (int selected in _thumbnailList.SelectedIndices)
+                    if (selected >= 0 && selected < _files.Count) targets.Add(_files[selected]);
+            }
+            else if (_index >= 0 && _index < _files.Count) targets.Add(_files[_index]);
+            using (CollageEditorForm dialog = new CollageEditorForm(targets))
+            {
+                dialog.ShowDialog(this);
+                if (!String.IsNullOrEmpty(dialog.OutputPath)) _statusText.Text = "已导出自由拼图：" + Path.GetFileName(dialog.OutputPath);
+            }
+        }
+
+        private void OpenImageCompare()
+        {
+            using (ImageCompareForm dialog = new ImageCompareForm()) dialog.ShowDialog(this);
         }
 
         private void ShowCurrentInfo()
@@ -505,6 +532,8 @@ namespace LocalPhotoViewer
             bar.Items.Add(Button("编辑", "裁剪、调色、滤镜、标注、水印、尺寸等", delegate { OpenEditor(); }));
             bar.Items.Add(Button("压缩", "按目标体积压缩当前图片", delegate { CompressCurrentImage(); }));
             bar.Items.Add(Button("批处理", "批量尺寸、裁剪、压缩、转换、旋转、命名、水印、复制、移动、回收站", delegate { OpenBatchTools(); }));
+            bar.Items.Add(Button("拼图", "把图片放到自由画布，拖动、缩放和分层摆放", delegate { OpenCollage(); }));
+            bar.Items.Add(Button("对比", "在独立左右视图中查看并缩放两张图片", delegate { OpenImageCompare(); }));
             bar.Items.Add(Button("信息", "查看尺寸、文件属性与 EXIF", delegate { ShowCurrentInfo(); }));
             bar.Items.Add(new ToolStripSeparator());
             bar.Items.Add(new ToolStripLabel("排序"));

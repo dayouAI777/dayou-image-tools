@@ -21,6 +21,9 @@ namespace LocalPhotoViewer
         private readonly CheckBox _keepRatio;
         private readonly NumericUpDown _quality;
         private readonly ComboBox _format;
+        private readonly Label _convertQualityLabel;
+        private readonly ComboBox _convertQuality;
+        private readonly Label _convertQualityNote;
         private readonly ComboBox _rotation;
         private readonly TextBox _prefix;
         private readonly TextBox _watermark;
@@ -60,6 +63,11 @@ namespace LocalPhotoViewer
             _format = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 75 };
             _format.Items.AddRange(new object[] { "PNG", "JPEG", "BMP", "TIFF", "GIF" });
             _format.SelectedIndex = 0;
+            _convertQualityLabel = new Label { Text = "输出清晰度", AutoSize = true, Padding = new Padding(4, 8, 0, 0) };
+            _convertQuality = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 125 };
+            _convertQuality.Items.AddRange(new object[] { "普通（75）", "高清（90）", "超清（98）" });
+            _convertQuality.SelectedIndex = 1;
+            _convertQualityNote = new Label { Text = "清晰度档位仅适用于 JPEG；PNG 无损保存。", AutoSize = true, Padding = new Padding(4, 8, 0, 0) };
             _rotation = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 };
             _rotation.Items.AddRange(new object[] { "向右 90°", "向左 90°", "180°" });
             _rotation.SelectedIndex = 0;
@@ -75,6 +83,9 @@ namespace LocalPhotoViewer
             settings.Controls.Add(_rotation);
             settings.Controls.Add(_prefix);
             settings.Controls.Add(_watermark);
+            settings.Controls.Add(_convertQualityLabel);
+            settings.Controls.Add(_convertQuality);
+            settings.Controls.Add(_convertQualityNote);
             layout.Controls.Add(settings, 0, 1);
 
             FlowLayoutPanel outputRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
@@ -103,6 +114,7 @@ namespace LocalPhotoViewer
             layout.Controls.Add(_log, 0, 5);
             Controls.Add(layout);
             _operation.SelectedIndexChanged += delegate { UpdateSettingsVisibility(settings); };
+            _format.SelectedIndexChanged += delegate { if (_operation.SelectedIndex == (int)BatchOperation.Convert) UpdateSettingsVisibility(settings); };
             UpdateSettingsVisibility(settings);
         }
 
@@ -113,7 +125,18 @@ namespace LocalPhotoViewer
             panel.Controls[0].Visible = true; panel.Controls[1].Visible = true;
             if (op == 0 || op == 6) { for (int i = 2; i <= 6; i++) panel.Controls[i].Visible = true; }
             else if (op == 1) { panel.Controls[7].Visible = true; panel.Controls[8].Visible = true; }
-            else if (op == 2) { panel.Controls[7].Visible = true; panel.Controls[8].Visible = true; panel.Controls[9].Visible = true; }
+            else if (op == (int)BatchOperation.Convert)
+            {
+                panel.Controls[9].Visible = true;
+                bool isJpeg = String.Equals(_format.SelectedItem as string, "JPEG", StringComparison.OrdinalIgnoreCase);
+                _convertQualityLabel.Visible = isJpeg;
+                _convertQuality.Visible = isJpeg;
+                _convertQualityNote.Visible = !isJpeg;
+                if (!isJpeg && String.Equals(_format.SelectedItem as string, "PNG", StringComparison.OrdinalIgnoreCase))
+                    _convertQualityNote.Text = "PNG 为无损格式，清晰度档位不适用。";
+                else if (!isJpeg)
+                    _convertQualityNote.Text = "清晰度档位仅适用于 JPEG。";
+            }
             else if (op == 3) { panel.Controls[10].Visible = true; }
             else if (op == 4) { panel.Controls[11].Visible = true; }
             else if (op == 5) { panel.Controls[12].Visible = true; }
@@ -144,6 +167,7 @@ namespace LocalPhotoViewer
                 try { Directory.CreateDirectory(_output.Text); }
                 catch (Exception ex) { MessageBox.Show(this, ex.Message, "不能创建输出文件夹", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             }
+
 
             _running = true;
             _progress.Value = 0;
@@ -272,7 +296,7 @@ namespace LocalPhotoViewer
                 {
                     if (destination.EndsWith(".jpg",StringComparison.OrdinalIgnoreCase))
                     {
-                        using (Bitmap flattened = FlattenOnWhite(bitmap)) PhotoEditorForm.SaveBitmap(flattened,destination,(long)_quality.Value);
+                        using (Bitmap flattened = FlattenOnWhite(bitmap)) PhotoEditorForm.SaveBitmap(flattened,destination,GetConvertJpegQuality());
                     }
                     else PhotoEditorForm.SaveBitmap(bitmap,destination,(long)_quality.Value);
                 }
@@ -289,6 +313,13 @@ namespace LocalPhotoViewer
         private static int ParsePositive(string text,int fallback)
         {
             int value; return Int32.TryParse(text,out value)&&value>0?Math.Min(30000,value):fallback;
+        }
+
+        private int GetConvertJpegQuality()
+        {
+            if (_convertQuality.SelectedIndex == 0) return 75;
+            if (_convertQuality.SelectedIndex == 2) return 98;
+            return 90;
         }
     }
 
