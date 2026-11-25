@@ -27,6 +27,8 @@ run.cmd "D:\Pictures"
 
 工具栏的“压缩”可将当前 JPG/JPEG 或 PNG 另存为副本，并用 10%–100% 进度条设置期望体积。默认采用无损优化；无损方式无法保证一定达到目标，完成时会显示实际体积。JPEG 可选重新编码，以尽量接近目标大小，但画质可能轻微变化。原图不会被覆盖。
 
+从 1.3.11 起，可选择“强制到指定大小”，为 JPEG 或普通 PNG 输入体积上限，最低 50 KB。为达到上限，程序可能降低 JPEG 编码质量或缩小像素尺寸。
+
 ### 图片格式
 
 除 Windows 自带解码器支持的 BMP、JPEG、PNG、GIF、TIFF、ICO、WMF、EMF 等格式外，安装包还携带 Magick.NET / ImageMagick 解码引擎，扩展支持 WebP、AVIF、HEIC/HEIF、JPEG XL、JPEG 2000、PSD/PSB、XCF、DDS、TGA、OpenEXR、Radiance HDR、Netpbm、QOI、SVG，以及多种相机 RAW 扩展名。查看、缩略图、编辑和批处理共用解码入口；打不开时会显示解码错误。
